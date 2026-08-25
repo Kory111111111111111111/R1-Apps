@@ -13,9 +13,25 @@
             <div id="currentType" class="type-current" aria-live="polite">D6</div>
             <button id="nextType" class="type-nav" type="button" aria-label="Next type"></button>
         </div>
-        <button id="result" class="result" type="button" aria-live="polite">—</button>
+        <button id="result" class="result" type="button" aria-live="polite">
+            <div id="coin" class="coin" hidden aria-hidden="true">
+                <div class="coin-inner">
+                    <div class="coin-face coin-front"><span class="coin-text" id="coinFrontText">HEADS</span></div>
+                    <div class="coin-face coin-back"><span class="coin-text" id="coinBackText">TAILS</span></div>
+                </div>
+            </div>
+            <div id="dieFace" class="die-face" hidden aria-hidden="true">
+                <div class="die-pips">
+                    <span class="pip"></span><span class="pip"></span><span class="pip"></span>
+                    <span class="pip"></span><span class="pip"></span><span class="pip"></span>
+                    <span class="pip"></span><span class="pip"></span><span class="pip"></span>
+                </div>
+                <div class="die-number" id="dieNumber">6</div>
+            </div>
+        </button>
         <p class="hint">scroll · side button rolls</p>
+        <span id="status" class="sr-only" aria-live="polite"></span>
     </div>
     <script src="js/app.js"></script>
 </body>
-</html>
+</html>
