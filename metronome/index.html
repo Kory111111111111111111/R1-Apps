@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+    <title>Metronome</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <div class="mode-row">
+            <button id="prevMode" class="mode-nav" type="button" aria-label="Previous mode"></button>
+            <div id="currentMode" class="mode-current" aria-live="polite">BEAT</div>
+            <button id="nextMode" class="mode-nav" type="button" aria-label="Next mode"></button>
+        </div>
+        <button id="bpmDisplay" class="bpm-display" type="button" aria-live="polite">
+            <span id="bpmValue" class="bpm-value">120</span>
+            <span id="bpmLabel" class="bpm-label">BPM</span>
+        </button>
+        <div class="beats" aria-hidden="true">
+            <span class="beat accent"></span>
+            <span class="beat"></span>
+            <span class="beat"></span>
+            <span class="beat"></span>
+        </div>
+        <p id="hint" class="hint">scroll: BPM · side: start/stop</p>
+        <span id="status" class="sr-only" aria-live="polite"></span>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>
