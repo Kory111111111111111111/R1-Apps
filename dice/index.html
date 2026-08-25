@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+    <title>Dice</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <div class="type-row">
+            <button id="prevType" class="type-nav" type="button" aria-label="Previous type"></button>
+            <div id="currentType" class="type-current" aria-live="polite">D6</div>
+            <button id="nextType" class="type-nav" type="button" aria-label="Next type"></button>
+        </div>
+        <button id="result" class="result" type="button" aria-live="polite">—</button>
+        <p class="hint">scroll · side button rolls</p>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>

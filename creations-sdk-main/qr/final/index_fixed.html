@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced QR Code Generator</title>
+    <link rel="stylesheet" href="./css/styles.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- QR Code Styling Library -->
+    <script src="https://unpkg.com/qr-code-styling@1.6.0-rc.1/lib/qr-code-styling.js"></script>
+</head>
+<body class="min-h-screen bg-gray-50">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">Enhanced QR Code Generator</h1>
+            <p class="text-gray-600">Generate custom QR codes from JSON data with advanced styling</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Form Section -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6">JSON Object Configuration</h2>
+                
+                <form id="qrForm" class="space-y-4">
+                    <div>
+                        <label for="title" class="block text-sm font-medium text-gray-700 mb-2">Title</label>
+                        <input
+type="text"
+id="title"
+name="title"
+class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+placeholder="Enter title"
+>
+                    </div>
+
+                    <div>
+                        <label for="url" class="block text-sm font-medium text-gray-700 mb-2">URL</label>
+                        <input
+type="url"
+id="url"
+name="url"
+class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+placeholder="https://example.com"
+>
+                    </div>
+
+                    <div>
+                        <label for="description" class="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                        <textarea
+id="description"
+name="description"
+rows="3"
+class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+placeholder="Enter description"
+></textarea>
+                    </div>
+
+                    <div>
+                        <label for="iconUrl" class="block text-sm font-medium text-gray-700 mb-2">Icon URL</label>
+                        <input
+type="url"
+id="iconUrl"
+name="iconUrl"
+class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+placeholder="https://icons.veryicon.com/png/o/miscellaneous/form-component/qr-code-236.png"
+>
+                    </div>
+
+                    <div>
+                        <label for="themeColor" class="block text-sm font-medium text-gray-700 mb-2">Theme Color</label>
+                        <input
+type="text"
+id="themeColor"
+name="themeColor"
+value="#FE5000"
+pattern="^#[0-9A-Fa-f]{6}$"
+placeholder="#FE5000"
+class="w-full h-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+>
+                    </div>
+
+                    <button type="submit" 
+                            class="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-2 px-4 rounded-md transition duration-200">
+                        Generate QR Code
+                    </button>
+                </form>
+
+                <div class="mt-6 pt-6 border-t border-gray-200">
+                    <h3 class="text-lg font-medium text-gray-800 mb-3">JSON Preview</h3>
+                    <pre id="jsonPreview" class="bg-gray-100 p-3 rounded-md text-sm text-gray-700 overflow-x-auto min-h-[100px]">
+{
+  "title": "",
+  "url": "",
+  "description": "",
+  "iconUrl": "",
+  "themeColor": "#FE5000"
+}
+                    </pre>
+                </div>
+            </div>
+
+            <!-- QR Code Display Section -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-6">Generated QR Code</h2>
+                
+                <div id="qrCodeContainer" class="flex flex-col items-center">
+                    <div id="qrCode" class="mb-4"></div>
+                    <div id="qrPlaceholder" class="w-64 h-64 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-500">
+                        <div class="text-center">
+                            <svg
+class="mx-auto h-12 w-12 text-gray-400 mb-2"
+fill="none"
+viewBox="0 0 24 24"
+stroke="currentColor"
+>
+                                <path
+stroke-linecap="round"
+stroke-linejoin="round"
+stroke-width="2"
+d="M12 4v16m8-8H4"
+/>
+                            </svg>
+                            <p>QR Code will appear here</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="downloadSection" class="mt-6 hidden">
+                    <button id="downloadBtn" 
+                            class="w-full bg-gray-800 hover:bg-gray-900 text-white font-semibold py-2 px-4 rounded-md transition duration-200">
+                        Download QR Code
+                    </button>
+                </div>
+
+                <div class="mt-6 pt-6 border-t border-gray-200">
+                    <h3 class="text-lg font-medium text-gray-800 mb-3">Share URL</h3>
+                    <div class="flex">
+                        <input
+type="text"
+id="shareUrl"
+readonly
+class="flex-1 px-3 py-2 border border-gray-300 rounded-l-md bg-gray-50 text-sm"
+>
+                        <button id="copyUrlBtn" 
+                                class="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-r-md transition duration-200">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="text-center mt-12 text-gray-500 text-sm">
+            <p>&copy; 2025 r1 creations - Enhanced QR Code Generator</p>
+        </footer>
+    </div>
+
+    <script src="./js/app.js"></script>
+</body>
+</html>
