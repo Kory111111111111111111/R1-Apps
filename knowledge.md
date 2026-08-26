@@ -8,6 +8,7 @@ Home repo for Rabbit R1 "Creations": small static HTML/CSS/JS web apps that run 
 
 - `dice/` — first-party Creation: dice/coin roller (`index.html`, `css/styles.css`, `js/app.js`). The reference pattern to mirror for new apps.
 - `metronome/` — first-party Creation: tap-tempo + metronome (`index.html`, `css/styles.css`, `js/app.js`). Web Audio lookahead clock, tap-to-BPM via median interval, scroll = BPM ±1 in BEAT mode / mode switch in TAP mode.
+- `weather/` — first-party Creation: weather forecast dashboard (`index.html`, `css/styles.css`, `js/app.js`). Open-Meteo live weather, scroll wheel for views (Current → Hourly → 7-Day), side button for °C/°F toggle, storage persistence.
 - `creations-sdk-main/` — upstream rabbit opensource SDK drop (MIT). **Read-only**: never edit; use as docs/examples only. Never place new apps inside it.
   - `plugin-demo/reference/creation-triggers.md` — canonical SDK API notes.
   - `plugin-demo/` — feature demo of SDK APIs (hardware, LLM, TTS, storage).
