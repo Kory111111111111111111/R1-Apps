@@ -1,6 +1,7 @@
 const STORAGE_KEY = "synthState";
 const SIDE_CLICK_DEBOUNCE_MS = 120;
 const MAX_VOICES = 8;
+const GAIN_FLOOR = 0.0001;
 const MASTER_GAIN = 0.2;
 const FILTER_Q = 1;
 const CUTOFF_MIN_HZ = 120;
@@ -125,8 +126,42 @@ const voices = [];
 const keyVoiceMap = new Map();
 const pressedKeys = new Map();
 
+function isFiniteNumber(value) {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
 function clamp(value, min, max) {
+    if (!isFiniteNumber(value)) {
+        return min;
+    }
     return Math.min(max, Math.max(min, value));
+}
+
+function safeGain(value) {
+    if (!isFiniteNumber(value) || value <= 0) {
+        return GAIN_FLOOR;
+    }
+    return Math.max(GAIN_FLOOR, value);
+}
+
+function safeTime(seconds) {
+    if (!isFiniteNumber(seconds) || seconds <= 0) {
+        return 0.001;
+    }
+    return seconds;
+}
+
+function eventClientX(event) {
+    if (isFiniteNumber(event.clientX)) {
+        return event.clientX;
+    }
+
+    const touch = (event.touches && event.touches[0]) || (event.changedTouches && event.changedTouches[0]);
+    if (touch && isFiniteNumber(touch.clientX)) {
+        return touch.clientX;
+    }
+
+    return null;
 }
 
 function currentWave() {
@@ -608,9 +643,11 @@ function releaseVoice(voice) {
     }
 
     const now = audioCtx.currentTime;
+    const release = safeTime(adsr.release);
+    const currentGain = safeGain(voice.gain.gain.value);
     voice.gain.gain.cancelScheduledValues(now);
-    voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
-    voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + adsr.release);
+    voice.gain.gain.setValueAtTime(currentGain, now);
+    voice.gain.gain.exponentialRampToValueAtTime(GAIN_FLOOR, now + release);
 
     const osc = voice.osc;
     const keyIndex = voice.keyIndex;
@@ -633,7 +670,7 @@ function releaseVoice(voice) {
         } catch (error) {
             // Already stopped.
         }
-    }, adsr.release * 1000 + 100);
+    }, release * 1000 + 100);
 }
 
 function startKey(keyIndex) {
@@ -663,14 +700,13 @@ function startKey(keyIndex) {
 
     // ADSR envelope: attack up to peak, decay down to sustain, hold.
     const now = audioCtx.currentTime;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(1, now + adsr.attack);
-    if (adsr.decay > 0) {
-        gain.gain.exponentialRampToValueAtTime(
-            Math.max(adsr.sustain, 0.0001),
-            now + adsr.attack + adsr.decay
-        );
-    }
+    const attack = safeTime(adsr.attack);
+    const decay = safeTime(adsr.decay);
+    const sustainLevel = safeGain(adsr.sustain);
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(GAIN_FLOOR, now);
+    gain.gain.exponentialRampToValueAtTime(1, now + attack);
+    gain.gain.exponentialRampToValueAtTime(sustainLevel, now + attack + decay);
     osc.start(now);
 
     voice.osc = osc;
@@ -792,13 +828,26 @@ function closeFxView() {
 
 function adsrFractionFromEvent(param, event) {
     const row = adsrRows.find((row) => row.dataset.param === param);
+    if (!row) {
+        return null;
+    }
+    const clientX = eventClientX(event);
+    if (clientX === null) {
+        return null;
+    }
     const rect = row.getBoundingClientRect();
-    return clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    if (!rect.width) {
+        return null;
+    }
+    return clamp((clientX - rect.left) / rect.width, 0, 1);
 }
 
 function adsrValueFromFraction(param, fraction) {
+    if (fraction === null || !isFiniteNumber(fraction)) {
+        return null;
+    }
     const cfg = ADSR_PARAMS[param];
-    return cfg.min + fraction * (cfg.max - cfg.min);
+    return cfg.min + clamp(fraction, 0, 1) * (cfg.max - cfg.min);
 }
 
 function formatAdsrValue(param, value) {
@@ -811,16 +860,27 @@ function formatAdsrValue(param, value) {
 function renderAdsr() {
     adsrRows.forEach((row) => {
         const param = row.dataset.param;
-        const value = adsr[param];
-        const fraction = (value - ADSR_PARAMS[param].min) / (ADSR_PARAMS[param].max - ADSR_PARAMS[param].min);
-        row.querySelector(".adsr-fill").style.width = fraction * 100 + "%";
-        row.querySelector(".adsr-value").textContent = formatAdsrValue(param, value);
+        const cfg = ADSR_PARAMS[param];
+        const value = isFiniteNumber(adsr[param]) ? adsr[param] : cfg.min;
+        const fraction = clamp((value - cfg.min) / (cfg.max - cfg.min), 0, 1);
+        const fill = row.querySelector(".adsr-fill");
+        if (fill) {
+            fill.style.width = (fraction * 100) + "%";
+        }
+        const valueEl = row.querySelector(".adsr-value");
+        if (valueEl) {
+            valueEl.textContent = formatAdsrValue(param, value);
+        }
         row.classList.toggle("is-selected", adsrDrag === param);
     });
 }
 
 function updateAdsrFromEvent(param, event) {
-    adsr[param] = adsrValueFromFraction(param, adsrFractionFromEvent(param, event));
+    const value = adsrValueFromFraction(param, adsrFractionFromEvent(param, event));
+    if (value === null) {
+        return;
+    }
+    adsr[param] = value;
     renderAdsr();
     saveState();
 }
@@ -832,6 +892,13 @@ function initializeAdsr() {
             event.preventDefault();
             event.stopPropagation();
             adsrDrag = param;
+            if (row.setPointerCapture && event.pointerId != null) {
+                try {
+                    row.setPointerCapture(event.pointerId);
+                } catch (error) {
+                    // Pointer capture may fail on some WebViews.
+                }
+            }
             renderAdsr();
             updateAdsrFromEvent(param, event);
         };
@@ -845,6 +912,13 @@ function initializeAdsr() {
             if (adsrDrag === param) {
                 event.preventDefault();
                 adsrDrag = null;
+                if (row.releasePointerCapture && event && event.pointerId != null) {
+                    try {
+                        row.releasePointerCapture(event.pointerId);
+                    } catch (error) {
+                        // Already released.
+                    }
+                }
                 renderAdsr();
                 saveState();
             }
@@ -1182,10 +1256,10 @@ function applySavedState(saved) {
     if (waveIdx !== -1) {
         waveIndex = waveIdx;
     }
-    if (typeof saved.cutoff === "number") {
+    if (typeof saved.cutoff === "number" && Number.isFinite(saved.cutoff)) {
         cutoff = clamp(saved.cutoff, 0, 100);
     }
-    if (typeof saved.octave === "number") {
+    if (typeof saved.octave === "number" && Number.isFinite(saved.octave)) {
         octave = clamp(saved.octave, MIN_OCTAVE, MAX_OCTAVE);
     }
     if (saved.fx && typeof saved.fx === "object") {
@@ -1197,7 +1271,7 @@ function applySavedState(saved) {
     }
     if (saved.adsr && typeof saved.adsr === "object") {
         Object.keys(ADSR_PARAMS).forEach((param) => {
-            if (typeof saved.adsr[param] === "number") {
+            if (typeof saved.adsr[param] === "number" && Number.isFinite(saved.adsr[param])) {
                 const cfg = ADSR_PARAMS[param];
                 adsr[param] = clamp(saved.adsr[param], cfg.min, cfg.max);
             }

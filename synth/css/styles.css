@@ -481,6 +481,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
     .cutoff-fill,
+    .adsr-fill,
     .key {
         transition: none;
     }
