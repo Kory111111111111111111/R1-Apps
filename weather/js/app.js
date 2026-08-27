@@ -1,17 +1,27 @@
 const STORAGE_KEY = "weatherState";
 const SIDE_CLICK_DEBOUNCE_MS = 120;
+const FETCH_TIMEOUT_MS = 9000;
+const US_ZIP_RE = /^\d{5}(?:-?\d{4})?$/;
+const ZIP_LENGTH = 5;
 
 let state = {
     lat: 40.7128,
     lon: -74.0060,
     cityName: "New York",
-    units: "imperial", // 'imperial' (°F, mph) or 'metric' (°C, km/h)
-    currentViewIndex: 0 // 0: Current, 1: Hourly, 2: Daily (5-Day)
+    zipCode: "10001",
+    units: "imperial",
+    currentViewIndex: 0 // 0: Current, 1: Hourly, 2: Daily, 3: Location
 };
 
-const views = ["viewCurrent", "viewHourly", "viewDaily"];
+const views = ["viewCurrent", "viewHourly", "viewDaily", "viewLocation"];
 let lastSideClickAt = 0;
 let weatherCache = null;
+let zipDigits = "";
+let isFetching = false;
+
+let pendingLlmResolve = null;
+let pendingLlmReject = null;
+let llmTimeoutId = null;
 
 // DOM Elements
 const locationNameEl = document.getElementById("locationName");
@@ -25,12 +35,121 @@ const hourlyListEl = document.getElementById("hourlyList");
 const dailyListEl = document.getElementById("dailyList");
 const dots = document.querySelectorAll(".dot");
 const statusEl = document.getElementById("status");
+const zipDisplayEl = document.getElementById("zipDisplay");
+const zipPadEl = document.getElementById("zipPad");
+const browserCityRowEl = document.getElementById("browserCityRow");
+const cityInputEl = document.getElementById("cityInput");
+const citySetBtnEl = document.getElementById("citySetBtn");
+const locationStatusEl = document.getElementById("locationStatus");
+
+function hasPluginHandler() {
+    return typeof PluginMessageHandler !== "undefined";
+}
+
+function isUsZip(query) {
+    return US_ZIP_RE.test(String(query).trim());
+}
+
+function normalizeZip(query) {
+    return String(query).trim().slice(0, ZIP_LENGTH);
+}
+
+function parseLlmJson(data) {
+    const sources = [data?.data, data?.message].filter((value) => value != null && value !== "");
+    for (const source of sources) {
+        if (typeof source === "object") {
+            return source;
+        }
+        const text = String(source).trim();
+        try {
+            return JSON.parse(text);
+        } catch (error) {
+            const match = text.match(/\{[\s\S]*\}/);
+            if (match) {
+                try {
+                    return JSON.parse(match[0]);
+                } catch (innerError) {
+                    // continue
+                }
+            }
+        }
+    }
+    throw new Error("Could not parse LLM JSON");
+}
+
+function sendLlmRequest(message) {
+    return new Promise((resolve, reject) => {
+        if (!hasPluginHandler()) {
+            reject(new Error("PluginMessageHandler not available"));
+            return;
+        }
+
+        if (pendingLlmResolve) {
+            clearTimeout(llmTimeoutId);
+            pendingLlmReject(new Error("Superseded LLM request"));
+        }
+
+        pendingLlmResolve = resolve;
+        pendingLlmReject = reject;
+
+        llmTimeoutId = setTimeout(() => {
+            pendingLlmResolve = null;
+            pendingLlmReject = null;
+            llmTimeoutId = null;
+            reject(new Error("LLM timeout"));
+        }, FETCH_TIMEOUT_MS);
+
+        try {
+            PluginMessageHandler.postMessage(JSON.stringify({
+                message: message,
+                useLLM: true,
+                wantsR1Response: false,
+                wantsJournalEntry: false
+            }));
+        } catch (error) {
+            clearTimeout(llmTimeoutId);
+            pendingLlmResolve = null;
+            pendingLlmReject = null;
+            llmTimeoutId = null;
+            reject(error);
+        }
+    });
+}
+
+window.onPluginMessage = function onPluginMessage(data) {
+    if (!pendingLlmResolve) {
+        return;
+    }
+
+    clearTimeout(llmTimeoutId);
+    llmTimeoutId = null;
+
+    const resolve = pendingLlmResolve;
+    const reject = pendingLlmReject;
+    pendingLlmResolve = null;
+    pendingLlmReject = null;
+
+    try {
+        resolve(parseLlmJson(data));
+    } catch (error) {
+        reject(error);
+    }
+};
+
+async function fetchWithTimeout(url, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 // SVG Weather Icons Generator
 function getWeatherSvg(code) {
-    // WMO Weather codes -> SVG graphics
     switch (code) {
-        case 0: // Clear sky
+        case 0:
             return `
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="5"></circle>
@@ -45,13 +164,13 @@ function getWeatherSvg(code) {
                 </svg>`;
         case 1:
         case 2:
-        case 3: // Partly cloudy / Cloudy
+        case 3:
             return `
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
                 </svg>`;
         case 45:
-        case 48: // Fog
+        case 48:
             return `
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="4" y1="10" x2="20" y2="10"></line>
@@ -67,7 +186,7 @@ function getWeatherSvg(code) {
         case 65:
         case 80:
         case 81:
-        case 82: // Rain
+        case 82:
             return `
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"></path>
@@ -80,7 +199,7 @@ function getWeatherSvg(code) {
         case 75:
         case 77:
         case 85:
-        case 86: // Snow
+        case 86:
             return `
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#e2e8f0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"></path>
@@ -90,7 +209,7 @@ function getWeatherSvg(code) {
                 </svg>`;
         case 95:
         case 96:
-        case 99: // Thunderstorm
+        case 99:
             return `
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 9"></path>
@@ -131,7 +250,18 @@ function getWeatherText(code) {
     }
 }
 
-// Load saved state
+function conditionTextToCode(text) {
+    const value = String(text || "").toLowerCase();
+    if (value.includes("clear") || value.includes("sunny")) return 0;
+    if (value.includes("fog")) return 45;
+    if (value.includes("drizzle")) return 53;
+    if (value.includes("thunder")) return 95;
+    if (value.includes("snow")) return 71;
+    if (value.includes("rain") || value.includes("shower")) return 61;
+    if (value.includes("cloud")) return 2;
+    return 1;
+}
+
 async function loadStoredState() {
     try {
         if (window.creationStorage?.plain) {
@@ -146,8 +276,8 @@ async function loadStoredState() {
                 state = { ...state, ...JSON.parse(raw) };
             }
         }
-    } catch (e) {
-        console.warn("Failed to load state", e);
+    } catch (error) {
+        console.warn("Failed to load state", error);
     }
 }
 
@@ -159,50 +289,257 @@ async function saveStoredState() {
         } else {
             localStorage.setItem(STORAGE_KEY, payload);
         }
-    } catch (e) {
-        console.warn("Failed to save state", e);
+    } catch (error) {
+        console.warn("Failed to save state", error);
     }
 }
 
-// Fetch Weather Data from Open-Meteo
-async function fetchWeather() {
-    locationNameEl.textContent = state.cityName;
-    tempUnitEl.textContent = state.units === "imperial" ? "°F" : "°C";
+function setLocationStatus(message, isError) {
+    locationStatusEl.textContent = message || "";
+    locationStatusEl.classList.toggle("error", Boolean(isError));
+}
 
-    const tempUnitParam = state.units === "imperial" ? "fahrenheit" : "celsius";
-    const windUnitParam = state.units === "imperial" ? "mph" : "kmh";
+function renderZipDisplay() {
+    const padded = (zipDigits + "-----").slice(0, ZIP_LENGTH);
+    zipDisplayEl.textContent = padded.split("").join(" ");
+}
 
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&hourly=temperature_2m,weather_code,time&daily=weather_code,temperature_2m_max,temperature_2m_min,time&temperature_unit=${tempUnitParam}&wind_speed_unit=${windUnitParam}&timezone=auto`;
+function resetZipDigits() {
+    zipDigits = state.zipCode ? normalizeZip(state.zipCode) : "";
+    renderZipDisplay();
+}
+
+async function geocodeZipViaApi(zip) {
+    const zip5 = normalizeZip(zip);
+    const res = await fetchWithTimeout(`https://api.zippopotam.us/us/${zip5}`, FETCH_TIMEOUT_MS);
+    if (!res.ok) {
+        throw new Error("ZIP not found");
+    }
+    const data = await res.json();
+    const place = data.places?.[0];
+    if (!place) {
+        throw new Error("ZIP not found");
+    }
+    return {
+        name: `${place["place name"]}, ${place["state abbreviation"]} ${zip5}`,
+        lat: parseFloat(place.latitude),
+        lon: parseFloat(place.longitude),
+        zipCode: zip5
+    };
+}
+
+async function geocodeCityViaApi(query) {
+    const res = await fetchWithTimeout(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1`,
+        FETCH_TIMEOUT_MS
+    );
+    if (!res.ok) {
+        throw new Error("Geocode failed");
+    }
+    const data = await res.json();
+    const result = data.results?.[0];
+    if (!result) {
+        throw new Error("No results");
+    }
+    const parts = [result.name];
+    if (result.admin1) {
+        parts.push(result.admin1);
+    }
+    if (result.country_code && result.country_code !== "US") {
+        parts.push(result.country);
+    }
+    return {
+        name: parts.join(", "),
+        lat: result.latitude,
+        lon: result.longitude,
+        zipCode: ""
+    };
+}
+
+async function geocodeZipViaLlm(zip) {
+    const zip5 = normalizeZip(zip);
+    const message = `The query "${zip5}" is a US ZIP code. Return ONLY valid JSON with the city name, state abbreviation, latitude and longitude: {"name":"City, ST ${zip5}","lat":0.0,"lon":0.0}`;
+    const parsed = await sendLlmRequest(message);
+    if (!parsed?.name || parsed.lat == null || parsed.lon == null) {
+        throw new Error("Invalid geocode response");
+    }
+    return {
+        name: parsed.name,
+        lat: Number(parsed.lat),
+        lon: Number(parsed.lon),
+        zipCode: zip5
+    };
+}
+
+async function geocodeCityViaLlm(query) {
+    const message = `Geocode the place "${query}". Return ONLY valid JSON: {"name":"City, Region","lat":0.0,"lon":0.0}`;
+    const parsed = await sendLlmRequest(message);
+    if (!parsed?.name || parsed.lat == null || parsed.lon == null) {
+        throw new Error("Invalid geocode response");
+    }
+    return {
+        name: parsed.name,
+        lat: Number(parsed.lat),
+        lon: Number(parsed.lon),
+        zipCode: ""
+    };
+}
+
+async function geocode(query) {
+    const trimmed = String(query).trim();
+    if (!trimmed) {
+        throw new Error("Enter a ZIP or city");
+    }
+
+    if (isUsZip(trimmed)) {
+        try {
+            return await geocodeZipViaApi(trimmed);
+        } catch (error) {
+            console.warn("ZIP API geocode failed", error);
+            if (hasPluginHandler()) {
+                return await geocodeZipViaLlm(trimmed);
+            }
+            throw error;
+        }
+    }
 
     try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("Network error");
-        weatherCache = await res.json();
+        return await geocodeCityViaApi(trimmed);
+    } catch (error) {
+        console.warn("City API geocode failed", error);
+        if (hasPluginHandler()) {
+            return await geocodeCityViaLlm(trimmed);
+        }
+        throw error;
+    }
+}
+
+function buildOpenMeteoUrl() {
+    const tempUnitParam = state.units === "imperial" ? "fahrenheit" : "celsius";
+    const windUnitParam = state.units === "imperial" ? "mph" : "kmh";
+    return `https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&hourly=temperature_2m,weather_code,time&daily=weather_code,temperature_2m_max,temperature_2m_min,time&temperature_unit=${tempUnitParam}&wind_speed_unit=${windUnitParam}&timezone=auto&forecast_days=5`;
+}
+
+async function fetchWeatherFromOpenMeteo() {
+    const res = await fetchWithTimeout(buildOpenMeteoUrl(), FETCH_TIMEOUT_MS);
+    if (!res.ok) {
+        throw new Error("Network error");
+    }
+    return res.json();
+}
+
+function normalizeLlmWeather(parsed) {
+    const windUnit = state.units === "imperial" ? "mph" : "km/h";
+    const current = parsed.current || {};
+    const hourly = parsed.hourly || {};
+    const daily = parsed.daily || {};
+
+    const weatherCode = current.weather_code != null
+        ? Number(current.weather_code)
+        : conditionTextToCode(current.condition || parsed.condition);
+
+    const hourlyTimes = Array.isArray(hourly.time) ? hourly.time : [];
+    const hourlyTemps = Array.isArray(hourly.temperature_2m) ? hourly.temperature_2m : [];
+    const hourlyCodes = Array.isArray(hourly.weather_code) ? hourly.weather_code : [];
+
+    const dailyTimes = Array.isArray(daily.time) ? daily.time.slice(0, 5) : [];
+    const dailyMax = Array.isArray(daily.temperature_2m_max) ? daily.temperature_2m_max.slice(0, 5) : [];
+    const dailyMin = Array.isArray(daily.temperature_2m_min) ? daily.temperature_2m_min.slice(0, 5) : [];
+    const dailyCodes = Array.isArray(daily.weather_code) ? daily.weather_code.slice(0, 5) : [];
+
+    return {
+        current: {
+            temperature_2m: Number(current.temperature_2m ?? current.temp ?? 0),
+            relative_humidity_2m: Number(current.relative_humidity_2m ?? current.humidity ?? 0),
+            weather_code: weatherCode,
+            wind_speed_10m: Number(current.wind_speed_10m ?? current.wind ?? 0)
+        },
+        current_units: {
+            wind_speed_10m: current.wind_unit || windUnit
+        },
+        hourly: {
+            time: hourlyTimes,
+            temperature_2m: hourlyTemps,
+            weather_code: hourlyCodes
+        },
+        daily: {
+            time: dailyTimes,
+            temperature_2m_max: dailyMax,
+            temperature_2m_min: dailyMin,
+            weather_code: dailyCodes
+        }
+    };
+}
+
+async function fetchWeatherViaLlm() {
+    const tempUnit = state.units === "imperial" ? "Fahrenheit" : "Celsius";
+    const windUnit = state.units === "imperial" ? "mph" : "km/h";
+    const message = `Get current weather and a 5-day forecast for ${state.cityName} (latitude ${state.lat}, longitude ${state.lon}). Use ${tempUnit} for temperatures and ${windUnit} for wind. Return ONLY valid JSON in this shape: {"current":{"temperature_2m":0,"relative_humidity_2m":0,"weather_code":0,"wind_speed_10m":0},"hourly":{"time":["ISO"],"temperature_2m":[0],"weather_code":[0]},"daily":{"time":["ISO"],"temperature_2m_max":[0],"temperature_2m_min":[0],"weather_code":[0]}}. weather_code should be a WMO code (0=clear, 1-3=cloudy, 45=fog, 51-65=rain, 71-86=snow, 95-99=thunderstorm).`;
+    const parsed = await sendLlmRequest(message);
+    return normalizeLlmWeather(parsed);
+}
+
+async function fetchWeather() {
+    if (isFetching) {
+        return;
+    }
+    isFetching = true;
+
+    locationNameEl.textContent = state.cityName;
+    tempUnitEl.textContent = state.units === "imperial" ? "°F" : "°C";
+    currentConditionEl.textContent = "Fetching forecast";
+    statusEl.textContent = "Loading weather";
+
+    try {
+        weatherCache = await fetchWeatherFromOpenMeteo();
         renderWeather();
-    } catch (e) {
-        console.error("Weather fetch failed", e);
-        currentConditionEl.textContent = "Offline / Error";
-        statusEl.textContent = "Failed to load weather data.";
+        statusEl.textContent = "Weather updated";
+    } catch (error) {
+        console.error("Direct weather fetch failed", error);
+        if (hasPluginHandler()) {
+            try {
+                currentConditionEl.textContent = "Using LLM forecast";
+                weatherCache = await fetchWeatherViaLlm();
+                renderWeather();
+                statusEl.textContent = "Weather updated via LLM";
+                isFetching = false;
+                return;
+            } catch (llmError) {
+                console.error("LLM weather failed", llmError);
+            }
+        }
+
+        weatherCache = null;
+        currentConditionEl.textContent = "Weather unavailable";
+        statusEl.textContent = "Set your ZIP on the Location view";
+        setLocationStatus("Could not load weather. Enter a ZIP.", true);
+        setView(3);
+    } finally {
+        isFetching = false;
     }
 }
 
 function renderWeather() {
-    if (!weatherCache) return;
+    if (!weatherCache?.current) {
+        return;
+    }
 
     const curr = weatherCache.current;
     currentIconEl.innerHTML = getWeatherSvg(curr.weather_code);
     currentTempEl.textContent = `${Math.round(curr.temperature_2m)}°`;
     currentConditionEl.textContent = getWeatherText(curr.weather_code);
-    detailHumidityEl.textContent = `H: ${curr.relative_humidity_2m}%`;
-    detailWindEl.textContent = `W: ${Math.round(curr.wind_speed_10m)} ${weatherCache.current_units.wind_speed_10m}`;
+    detailHumidityEl.textContent = `H: ${Math.round(curr.relative_humidity_2m)}%`;
+    const windUnit = weatherCache.current_units?.wind_speed_10m || (state.units === "imperial" ? "mph" : "km/h");
+    detailWindEl.textContent = `W: ${Math.round(curr.wind_speed_10m)} ${windUnit}`;
 
-    // Render Hourly (next 12 hours)
-    const nowIdx = weatherCache.hourly.time.findIndex(t => new Date(t) >= new Date()) || 0;
+    const hourly = weatherCache.hourly || { time: [], temperature_2m: [], weather_code: [] };
+    const nowIdx = hourly.time.findIndex((t) => new Date(t) >= new Date());
+    const startIdx = nowIdx === -1 ? 0 : nowIdx;
     let hourlyHtml = "";
-    for (let i = Math.max(0, nowIdx); i < Math.min(weatherCache.hourly.time.length, nowIdx + 12); i++) {
-        const timeStr = new Date(weatherCache.hourly.time[i]).toLocaleTimeString([], { hour: 'numeric', hour12: true });
-        const temp = Math.round(weatherCache.hourly.temperature_2m[i]);
-        const svgIcon = getWeatherSvg(weatherCache.hourly.weather_code[i]);
+    for (let i = startIdx; i < Math.min(hourly.time.length, startIdx + 12); i++) {
+        const timeStr = new Date(hourly.time[i]).toLocaleTimeString([], { hour: "numeric", hour12: true });
+        const temp = Math.round(hourly.temperature_2m[i]);
+        const svgIcon = getWeatherSvg(hourly.weather_code[i]);
         hourlyHtml += `
             <div class="hourly-item">
                 <span class="hourly-time">${timeStr}</span>
@@ -213,15 +550,15 @@ function renderWeather() {
     }
     hourlyListEl.innerHTML = hourlyHtml;
 
-    // Render 5-Day Forecast
+    const daily = weatherCache.daily || { time: [], temperature_2m_max: [], temperature_2m_min: [], weather_code: [] };
     let dailyHtml = "";
-    const daysToShow = Math.min(5, weatherCache.daily?.time?.length || 0);
+    const daysToShow = Math.min(5, daily.time.length);
     for (let i = 0; i < daysToShow; i++) {
-        const d = new Date(weatherCache.daily.time[i]);
-        const dayName = i === 0 ? "Today" : d.toLocaleDateString([], { weekday: 'short' });
-        const maxT = Math.round(weatherCache.daily.temperature_2m_max[i]);
-        const minT = Math.round(weatherCache.daily.temperature_2m_min[i]);
-        const svgIcon = getWeatherSvg(weatherCache.daily.weather_code[i]);
+        const d = new Date(daily.time[i]);
+        const dayName = i === 0 ? "Today" : d.toLocaleDateString([], { weekday: "short" });
+        const maxT = Math.round(daily.temperature_2m_max[i]);
+        const minT = Math.round(daily.temperature_2m_min[i]);
+        const svgIcon = getWeatherSvg(daily.weather_code[i]);
         dailyHtml += `
             <div class="daily-item">
                 <span class="daily-day">${dayName}</span>
@@ -233,59 +570,167 @@ function renderWeather() {
     dailyListEl.innerHTML = dailyHtml;
 }
 
-// Switch Views
 function setView(index) {
     state.currentViewIndex = (index + views.length) % views.length;
-    
-    views.forEach((vId, idx) => {
-        const el = document.getElementById(vId);
-        if (idx === state.currentViewIndex) {
-            el.classList.add("active");
-        } else {
-            el.classList.remove("active");
-        }
+
+    views.forEach((viewId, idx) => {
+        const el = document.getElementById(viewId);
+        el.classList.toggle("active", idx === state.currentViewIndex);
     });
 
     dots.forEach((dot, idx) => {
-        if (idx === state.currentViewIndex) {
-            dot.classList.add("active");
-        } else {
-            dot.classList.remove("active");
-        }
+        dot.classList.toggle("active", idx === state.currentViewIndex);
     });
 
-    const viewNames = ["Current Weather", "Hourly Forecast", "5-Day Forecast"];
+    const viewNames = ["Current Weather", "Hourly Forecast", "5-Day Forecast", "Location"];
     statusEl.textContent = `Switched to ${viewNames[state.currentViewIndex]}`;
 }
 
-// Hardware Event Listeners
-window.addEventListener("scrollUp", () => {
-    setView(state.currentViewIndex - 1);
-});
+async function applyLocation(result) {
+    state.lat = result.lat;
+    state.lon = result.lon;
+    state.cityName = result.name;
+    state.zipCode = result.zipCode || "";
+    zipDigits = state.zipCode;
+    renderZipDisplay();
+    locationNameEl.textContent = state.cityName;
+    setLocationStatus(`Set to ${state.cityName}`, false);
+    await saveStoredState();
+    setView(0);
+    await fetchWeather();
+}
 
-window.addEventListener("scrollDown", () => {
-    setView(state.currentViewIndex + 1);
-});
+async function submitZip() {
+    if (zipDigits.length !== ZIP_LENGTH) {
+        setLocationStatus("Enter a 5-digit ZIP", true);
+        return;
+    }
+    setLocationStatus("Looking up ZIP...", false);
+    try {
+        const result = await geocode(zipDigits);
+        await applyLocation(result);
+    } catch (error) {
+        console.error("ZIP geocode failed", error);
+        setLocationStatus("ZIP lookup failed. Try again.", true);
+    }
+}
 
-window.addEventListener("sideClick", () => {
-    const now = Date.now();
-    if (now - lastSideClickAt < SIDE_CLICK_DEBOUNCE_MS) return;
-    lastSideClickAt = now;
+async function submitCity() {
+    const query = cityInputEl.value.trim();
+    if (!query) {
+        setLocationStatus("Enter a city name", true);
+        return;
+    }
+    setLocationStatus("Looking up city...", false);
+    try {
+        const result = await geocode(query);
+        await applyLocation(result);
+    } catch (error) {
+        console.error("City geocode failed", error);
+        setLocationStatus("City lookup failed. Try again.", true);
+    }
+}
 
-    state.units = state.units === "imperial" ? "metric" : "imperial";
-    saveStoredState();
-    fetchWeather();
-    statusEl.textContent = `Switched to ${state.units} units`;
-});
+function onPadDigit(digit) {
+    if (zipDigits.length >= ZIP_LENGTH) {
+        return;
+    }
+    zipDigits += digit;
+    renderZipDisplay();
+    setLocationStatus("", false);
+    if (zipDigits.length === ZIP_LENGTH) {
+        submitZip();
+    }
+}
 
-// Click fallback for desktop preview testing
-document.addEventListener("click", () => {
-    setView(state.currentViewIndex + 1);
-});
+function onPadBackspace() {
+    zipDigits = zipDigits.slice(0, -1);
+    renderZipDisplay();
+    setLocationStatus("", false);
+}
 
-// Init
+function initializeZipPad() {
+    zipPadEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const button = event.target.closest(".pad-key");
+        if (!button) {
+            return;
+        }
+
+        const digit = button.dataset.digit;
+        const action = button.dataset.action;
+        if (digit != null) {
+            onPadDigit(digit);
+            return;
+        }
+        if (action === "back") {
+            onPadBackspace();
+            return;
+        }
+        if (action === "set") {
+            submitZip();
+        }
+    });
+}
+
+function initializeBrowserCityInput() {
+    if (!hasPluginHandler()) {
+        browserCityRowEl.classList.remove("hidden");
+    }
+
+    citySetBtnEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        submitCity();
+    });
+
+    cityInputEl.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") {
+            event.preventDefault();
+            submitCity();
+        }
+    });
+}
+
+function initializeHardware() {
+    window.addEventListener("scrollUp", () => {
+        setView(state.currentViewIndex - 1);
+    });
+
+    window.addEventListener("scrollDown", () => {
+        setView(state.currentViewIndex + 1);
+    });
+
+    window.addEventListener("sideClick", () => {
+        const now = Date.now();
+        if (now - lastSideClickAt < SIDE_CLICK_DEBOUNCE_MS) {
+            return;
+        }
+        lastSideClickAt = now;
+
+        state.units = state.units === "imperial" ? "metric" : "imperial";
+        saveStoredState();
+        fetchWeather();
+        statusEl.textContent = `Switched to ${state.units} units`;
+    });
+}
+
+function initializeFallbackInput() {
+    document.addEventListener("click", (event) => {
+        if (event.target.closest(".zip-pad, .browser-city-row, .location-input, .city-set-btn")) {
+            return;
+        }
+        setView(state.currentViewIndex + 1);
+    });
+}
+
 async function init() {
     await loadStoredState();
+    resetZipDigits();
+    initializeZipPad();
+    initializeBrowserCityInput();
+    initializeHardware();
+    initializeFallbackInput();
     await fetchWeather();
 }
 

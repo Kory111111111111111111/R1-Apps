@@ -37,10 +37,35 @@
 
             <!-- Daily View -->
             <div id="viewDaily" class="view">
-                <div class="view-title">7-Day Forecast</div>
+                <div class="view-title">5-Day Forecast</div>
                 <div id="dailyList" class="daily-list">
                     <!-- Populated by JS -->
                 </div>
+            </div>
+
+            <!-- Location View -->
+            <div id="viewLocation" class="view location-view">
+                <div class="view-title">Location</div>
+                <div id="zipDisplay" class="zip-display" aria-label="ZIP code">-----</div>
+                <div id="zipPad" class="zip-pad" role="group" aria-label="ZIP digit pad">
+                    <button type="button" class="pad-key" data-digit="1">1</button>
+                    <button type="button" class="pad-key" data-digit="2">2</button>
+                    <button type="button" class="pad-key" data-digit="3">3</button>
+                    <button type="button" class="pad-key" data-digit="4">4</button>
+                    <button type="button" class="pad-key" data-digit="5">5</button>
+                    <button type="button" class="pad-key" data-digit="6">6</button>
+                    <button type="button" class="pad-key" data-digit="7">7</button>
+                    <button type="button" class="pad-key" data-digit="8">8</button>
+                    <button type="button" class="pad-key" data-digit="9">9</button>
+                    <button type="button" class="pad-key pad-back" data-action="back" aria-label="Backspace">⌫</button>
+                    <button type="button" class="pad-key" data-digit="0">0</button>
+                    <button type="button" class="pad-key pad-set" data-action="set">Set</button>
+                </div>
+                <div id="browserCityRow" class="browser-city-row hidden">
+                    <input type="text" id="cityInput" class="location-input" placeholder="City name" autocomplete="off" enterkeyhint="go">
+                    <button type="button" id="citySetBtn" class="city-set-btn">Go</button>
+                </div>
+                <p id="locationStatus" class="location-status"></p>
             </div>
         </main>
 
@@ -49,6 +74,7 @@
                 <span class="dot active" data-index="0"></span>
                 <span class="dot" data-index="1"></span>
                 <span class="dot" data-index="2"></span>
+                <span class="dot" data-index="3"></span>
             </div>
             <p id="hint" class="hint">scroll: view · side: °C/°F</p>
         </footer>
