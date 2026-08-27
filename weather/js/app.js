@@ -522,7 +522,7 @@ async function geocode(query) {
 function buildOpenMeteoUrl() {
     const tempUnitParam = state.units === "imperial" ? "fahrenheit" : "celsius";
     const windUnitParam = state.units === "imperial" ? "mph" : "kmh";
-    return `https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&hourly=temperature_2m,weather_code,time&daily=weather_code,temperature_2m_max,temperature_2m_min,time&temperature_unit=${tempUnitParam}&wind_speed_unit=${windUnitParam}&timezone=auto&forecast_days=5`;
+    return `https://api.open-meteo.com/v1/forecast?latitude=${state.lat}&longitude=${state.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&temperature_unit=${tempUnitParam}&wind_speed_unit=${windUnitParam}&timezone=auto&forecast_days=5`;
 }
 
 async function fetchWeatherFromOpenMeteo() {
@@ -663,6 +663,8 @@ async function fetchWeather() {
     } catch (error) {
         console.error("Direct weather fetch failed", error);
         if (hasPluginHandler()) {
+            currentConditionEl.textContent = "Trying backup…";
+            statusEl.textContent = "Open-Meteo failed, using LLM";
             try {
                 weatherCache = await fetchWeatherViaLlm();
                 renderWeather();
