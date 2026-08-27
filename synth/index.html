@@ -27,6 +27,25 @@
             </div>
         </header>
 
+        <div class="adsr-row" aria-label="ADSR envelope">
+            <div class="adsr-slider" id="adsrAttack" data-param="attack" aria-label="Attack">
+                <span class="adsr-label">A</span>
+                <div class="adsr-bar"><div class="adsr-fill"></div></div>
+            </div>
+            <div class="adsr-slider" id="adsrDecay" data-param="decay" aria-label="Decay">
+                <span class="adsr-label">D</span>
+                <div class="adsr-bar"><div class="adsr-fill"></div></div>
+            </div>
+            <div class="adsr-slider" id="adsrSustain" data-param="sustain" aria-label="Sustain">
+                <span class="adsr-label">S</span>
+                <div class="adsr-bar"><div class="adsr-fill"></div></div>
+            </div>
+            <div class="adsr-slider" id="adsrRelease" data-param="release" aria-label="Release">
+                <span class="adsr-label">R</span>
+                <div class="adsr-bar"><div class="adsr-fill"></div></div>
+            </div>
+        </div>
+
         <div id="padGrid" class="pad-grid" role="group" aria-label="Note pads">
             <button class="pad" type="button" data-degree="0" data-label="C">C</button>
             <button class="pad" type="button" data-degree="2" data-label="D">D</button>

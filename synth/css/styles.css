@@ -132,6 +132,51 @@ body {
     background: var(--pad-active);
 }
 
+/* --- ADSR sliders --- */
+
+.adsr-row {
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.adsr-slider {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-height: 28px;
+    padding: 2px 0;
+    touch-action: none;
+    cursor: pointer;
+}
+
+.adsr-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--muted);
+    width: 10px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+.adsr-bar {
+    flex: 1;
+    height: 8px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+}
+
+.adsr-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 60ms ease;
+}
+
 /* --- Pad grid --- */
 
 .pad-grid {
@@ -192,6 +237,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
     .cutoff-fill,
+    .adsr-fill,
     .pad {
         transition: none;
     }

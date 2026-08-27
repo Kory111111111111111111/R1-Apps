@@ -1,8 +1,7 @@
 const STORAGE_KEY = "synthState";
 const SIDE_CLICK_DEBOUNCE_MS = 120;
 const MAX_VOICES = 4;
-const ATTACK_S = 0.01;
-const RELEASE_S = 0.08;
+const GAIN_FLOOR = 0.0001;
 const MASTER_GAIN = 0.2;
 const FILTER_Q = 1;
 const CUTOFF_MIN_HZ = 120;
@@ -12,6 +11,13 @@ const MAX_OCTAVE = 6;
 const DEFAULT_WAVE = "sawtooth";
 const DEFAULT_CUTOFF = 70;
 const DEFAULT_OCTAVE = 3;
+
+const ADSR_SPECS = {
+    attack: { min: 0.001, max: 1, default: 0.01 },
+    decay: { min: 0.001, max: 1, default: 0.1 },
+    sustain: { min: 0, max: 1, default: 0.7 },
+    release: { min: 0.001, max: 2, default: 0.2 }
+};
 
 const WAVES = [
     { id: "sine", label: "SIN" },
@@ -30,11 +36,18 @@ const octaveDownEl = document.getElementById("octaveDown");
 const octaveUpEl = document.getElementById("octaveUp");
 const padEls = Array.from(document.querySelectorAll(".pad"));
 const statusEl = document.getElementById("status");
+const adsrSliderEls = {
+    attack: document.getElementById("adsrAttack"),
+    decay: document.getElementById("adsrDecay"),
+    sustain: document.getElementById("adsrSustain"),
+    release: document.getElementById("adsrRelease")
+};
 
 let waveIndex = WAVES.findIndex((wave) => wave.id === DEFAULT_WAVE);
 let cutoff = DEFAULT_CUTOFF;
 let octave = DEFAULT_OCTAVE;
 let lastSideClickAt = 0;
+const adsr = defaultAdsr();
 
 let audioCtx = null;
 let masterGain = null;
@@ -42,8 +55,117 @@ let filter = null;
 const voices = [];
 const padVoiceMap = new Map();
 
+function isFiniteNumber(value) {
+    return typeof value === "number" && Number.isFinite(value);
+}
+
 function clamp(value, min, max) {
+    if (!isFiniteNumber(value)) {
+        return min;
+    }
     return Math.min(max, Math.max(min, value));
+}
+
+function defaultAdsr() {
+    return {
+        attack: ADSR_SPECS.attack.default,
+        decay: ADSR_SPECS.decay.default,
+        sustain: ADSR_SPECS.sustain.default,
+        release: ADSR_SPECS.release.default
+    };
+}
+
+function safeGain(value) {
+    if (!isFiniteNumber(value) || value <= 0) {
+        return GAIN_FLOOR;
+    }
+    return Math.max(GAIN_FLOOR, value);
+}
+
+function safeTime(seconds) {
+    if (!isFiniteNumber(seconds) || seconds <= 0) {
+        return 0.001;
+    }
+    return seconds;
+}
+
+function eventClientX(event) {
+    if (isFiniteNumber(event.clientX)) {
+        return event.clientX;
+    }
+
+    const touch = (event.touches && event.touches[0]) || (event.changedTouches && event.changedTouches[0]);
+    if (touch && isFiniteNumber(touch.clientX)) {
+        return touch.clientX;
+    }
+
+    return null;
+}
+
+function adsrFractionFromEvent(event, row) {
+    const clientX = eventClientX(event);
+    if (clientX === null) {
+        return null;
+    }
+
+    const rect = row.getBoundingClientRect();
+    if (!rect.width) {
+        return null;
+    }
+
+    return clamp((clientX - rect.left) / rect.width, 0, 1);
+}
+
+function adsrFractionForParam(param) {
+    const spec = ADSR_SPECS[param];
+    const value = isFiniteNumber(adsr[param]) ? adsr[param] : spec.default;
+    return clamp((value - spec.min) / (spec.max - spec.min), 0, 1);
+}
+
+function setAdsrFromFraction(param, fraction) {
+    if (fraction === null || !isFiniteNumber(fraction)) {
+        return;
+    }
+
+    const spec = ADSR_SPECS[param];
+    adsr[param] = spec.min + clamp(fraction, 0, 1) * (spec.max - spec.min);
+    renderAdsr();
+    saveState();
+}
+
+function renderAdsr() {
+    Object.keys(adsrSliderEls).forEach((param) => {
+        const row = adsrSliderEls[param];
+        if (!row) {
+            return;
+        }
+        const fill = row.querySelector(".adsr-fill");
+        if (fill) {
+            fill.style.width = (adsrFractionForParam(param) * 100) + "%";
+        }
+    });
+}
+
+function scheduleAttackDecay(gainNode, now) {
+    const attack = safeTime(adsr.attack);
+    const decay = safeTime(adsr.decay);
+    const sustainLevel = safeGain(adsr.sustain);
+    const peakTime = now + attack;
+    const sustainTime = peakTime + decay;
+
+    gainNode.gain.cancelScheduledValues(now);
+    gainNode.gain.setValueAtTime(GAIN_FLOOR, now);
+    gainNode.gain.exponentialRampToValueAtTime(1, peakTime);
+    gainNode.gain.exponentialRampToValueAtTime(sustainLevel, sustainTime);
+}
+
+function scheduleRelease(gainNode, now) {
+    const release = safeTime(adsr.release);
+    const currentGain = safeGain(gainNode.gain.value);
+
+    gainNode.gain.cancelScheduledValues(now);
+    gainNode.gain.setValueAtTime(currentGain, now);
+    gainNode.gain.exponentialRampToValueAtTime(GAIN_FLOOR, now + release);
 }
 
 function currentWave() {
@@ -137,7 +259,7 @@ function stopVoiceImmediate(voice) {
 
     try {
         voice.gain.gain.cancelScheduledValues(audioCtx.currentTime);
-        voice.gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+        voice.gain.gain.setValueAtTime(GAIN_FLOOR, audioCtx.currentTime);
         voice.osc.stop(audioCtx.currentTime + 0.001);
         voice.osc.disconnect();
         voice.gain.disconnect();
@@ -162,9 +284,8 @@ function releaseVoice(voice) {
     }
 
     const now = audioCtx.currentTime;
-    voice.gain.gain.cancelScheduledValues(now);
-    voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
-    voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + RELEASE_S);
+    const release = safeTime(adsr.release);
+    scheduleRelease(voice.gain, now);
 
     const osc = voice.osc;
     const padIndex = voice.padIndex;
@@ -187,7 +308,7 @@ function releaseVoice(voice) {
         } catch (error) {
             // Already stopped.
         }
-    }, RELEASE_S * 1000 + 20);
+    }, release * 1000 + 20);
 }
 
 function startPad(padIndex) {
@@ -216,8 +337,7 @@ function startPad(padIndex) {
     gain.connect(filter);
 
     const now = audioCtx.currentTime;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(1, now + ATTACK_S);
+    scheduleAttackDecay(gain, now);
     osc.start(now);
 
     voice.osc = osc;
@@ -312,6 +432,82 @@ function initializePads() {
     });
 }
 
+function initializeAdsrSliders() {
+    Object.keys(adsrSliderEls).forEach((param) => {
+        const row = adsrSliderEls[param];
+        if (!row) {
+            return;
+        }
+
+        let dragging = false;
+
+        const apply = (event) => {
+            const fraction = adsrFractionFromEvent(event, row);
+            if (fraction !== null) {
+                setAdsrFromFraction(param, fraction);
+            }
+        };
+
+        const onPointerDown = (event) => {
+            event.preventDefault();
+            dragging = true;
+            if (row.setPointerCapture) {
+                try {
+                    row.setPointerCapture(event.pointerId);
+                } catch (error) {
+                    // Pointer capture may fail on some WebViews.
+                }
+            }
+            apply(event);
+        };
+
+        const onPointerMove = (event) => {
+            if (!dragging) {
+                return;
+            }
+            apply(event);
+        };
+
+        const endDrag = (event) => {
+            dragging = false;
+            if (row.releasePointerCapture && event) {
+                try {
+                    row.releasePointerCapture(event.pointerId);
+                } catch (error) {
+                    // Already released.
+                }
+            }
+        };
+
+        row.addEventListener("pointerdown", onPointerDown);
+        row.addEventListener("pointermove", onPointerMove);
+        row.addEventListener("pointerup", endDrag);
+        row.addEventListener("pointercancel", endDrag);
+
+        row.addEventListener("touchstart", (event) => {
+            event.preventDefault();
+            dragging = true;
+            apply(event);
+        }, { passive: false });
+
+        row.addEventListener("touchmove", (event) => {
+            if (!dragging) {
+                return;
+            }
+            event.preventDefault();
+            apply(event);
+        }, { passive: false });
+
+        row.addEventListener("touchend", () => {
+            dragging = false;
+        });
+
+        row.addEventListener("touchcancel", () => {
+            dragging = false;
+        });
+    });
+}
+
 function initializeHardware() {
     window.addEventListener("scrollUp", () => setCutoff(cutoff - 2));
     window.addEventListener("scrollDown", () => setCutoff(cutoff + 2));
@@ -352,7 +548,8 @@ async function saveState() {
     const snapshot = {
         wave: currentWave().id,
         cutoff: cutoff,
-        octave: octave
+        octave: octave,
+        adsr: { ...adsr }
     };
     const payload = JSON.stringify(snapshot);
 
@@ -404,11 +601,20 @@ function applySavedState(saved) {
     if (waveIdx !== -1) {
         waveIndex = waveIdx;
     }
-    if (typeof saved.cutoff === "number") {
+    if (typeof saved.cutoff === "number" && Number.isFinite(saved.cutoff)) {
         cutoff = clamp(saved.cutoff, 0, 100);
     }
-    if (typeof saved.octave === "number") {
+    if (typeof saved.octave === "number" && Number.isFinite(saved.octave)) {
         octave = clamp(saved.octave, MIN_OCTAVE, MAX_OCTAVE);
+    }
+    if (saved.adsr && typeof saved.adsr === "object") {
+        Object.keys(ADSR_SPECS).forEach((param) => {
+            const value = saved.adsr[param];
+            const spec = ADSR_SPECS[param];
+            if (typeof value === "number" && Number.isFinite(value)) {
+                adsr[param] = clamp(value, spec.min, spec.max);
+            }
+        });
     }
 }
 
@@ -416,7 +622,9 @@ async function init() {
     const saved = await loadState();
     applySavedState(saved);
     renderHeader();
+    renderAdsr();
     initializePads();
+    initializeAdsrSliders();
     initializeHardware();
     initializeFallbackInput();
 }
