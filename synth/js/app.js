@@ -72,6 +72,7 @@ const fxReverbStateEl = document.getElementById("fxReverbState");
 const fxDelayStateEl = document.getElementById("fxDelayState");
 const fxChorusStateEl = document.getElementById("fxChorusState");
 const adsrRows = Array.from(document.querySelectorAll(".adsr-row"));
+const keyboardEl = document.getElementById("keyboard");
 const keyEls = Array.from(document.querySelectorAll(".key"));
 const keyOffsets = keyEls.map((el) => Number(el.dataset.offset));
 const statusEl = document.getElementById("status");
@@ -125,6 +126,7 @@ let fxChorusWet = null;
 const voices = [];
 const keyVoiceMap = new Map();
 const pressedKeys = new Map();
+const pointerKeys = new Map();
 
 function isFiniteNumber(value) {
     return typeof value === "number" && Number.isFinite(value);
@@ -202,10 +204,53 @@ function makeImpulseResponse(ctx, seconds, decay) {
     return buffer;
 }
 
+function resumeAudio() {
+    if (audioCtx && audioCtx.state !== "running" && typeof audioCtx.resume === "function") {
+        audioCtx.resume().catch(() => {});
+    }
+}
+
+function wantsAudio() {
+    if (loopState.playing || loopState.recording) {
+        return true;
+    }
+    if (arpOn && keyVoiceMap.size > 0) {
+        return true;
+    }
+    return voices.some((voice) => voice.active);
+}
+
+function pauseBackgroundAudio() {
+    allNotesOff();
+    if (loopState.schedulerTimer) {
+        clearInterval(loopState.schedulerTimer);
+        loopState.schedulerTimer = null;
+    }
+    killLoopVoices();
+    if (arpTimer) {
+        clearInterval(arpTimer);
+        arpTimer = null;
+    }
+}
+
+function resumeForegroundAudio() {
+    resumeAudio();
+    if (loopState.playing && !loopState.schedulerTimer && audioCtx) {
+        loopState.loopStart = audioCtx.currentTime + 0.05;
+        loopState.nextIndex = 0;
+        scheduleLoop();
+        loopState.schedulerTimer = setInterval(scheduleLoop, 100);
+        renderTunes();
+    }
+    if (arpOn && !arpTimer) {
+        arpTimer = setInterval(arpTick, ARP_RATES[arpRateIndex].ms);
+    }
+}
+
 function ensureAudio() {
     if (audioCtx) {
-        if (audioCtx.state === "suspended" && audioCtx.resume) {
-            audioCtx.resume().catch(() => {});
+        if (audioCtx.state === "suspended" || audioCtx.state === "interrupted") {
+            resumeAudio();
         }
         return audioCtx;
     }
@@ -290,9 +335,16 @@ function ensureAudio() {
             });
         }
 
-        if (audioCtx.resume) {
-            audioCtx.resume().catch(() => {});
-        }
+        audioCtx.addEventListener("statechange", () => {
+            if (!audioCtx) {
+                return;
+            }
+            if ((audioCtx.state === "suspended" || audioCtx.state === "interrupted") && wantsAudio()) {
+                resumeAudio();
+            }
+        });
+
+        resumeAudio();
     } catch (error) {
         console.warn("AudioContext init failed", error);
         audioCtx = null;
@@ -739,6 +791,7 @@ function allNotesOff() {
     keyVoiceMap.clear();
     keyEls.forEach((key, index) => setKeyHeld(index, false));
     pressedKeys.clear();
+    pointerKeys.clear();
     statusEl.textContent = "All notes off";
 }
 
@@ -937,34 +990,86 @@ function initializeAdsr() {
 
 /* --- Input wiring --- */
 
-function initializeKeys() {
-    keyEls.forEach((key, index) => {
-        const onDown = (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            startKey(index);
-        };
-        const onUp = (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            stopKey(index);
-        };
-        const onEnter = (event) => {
-            // Slide across keys (glissando) while a pointer is held down.
-            if (event.buttons > 0) {
-                startKey(index);
-            }
-        };
+function keyIndexFromPoint(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) {
+        return -1;
+    }
+    const key = el.closest(".key");
+    if (!key) {
+        return -1;
+    }
+    return keyEls.indexOf(key);
+}
 
-        key.addEventListener("pointerdown", onDown);
-        key.addEventListener("pointerup", onUp);
-        key.addEventListener("pointerleave", onUp);
-        key.addEventListener("pointercancel", onUp);
-        key.addEventListener("pointerenter", onEnter);
-        key.addEventListener("touchstart", onDown, { passive: false });
-        key.addEventListener("touchend", onUp, { passive: false });
-        key.addEventListener("touchcancel", onUp, { passive: false });
-    });
+function initializeKeys() {
+    // Pointer capture on the keyboard (not per-key leave) so a finger that
+    // jitters off a ~30px key does not kill the note. Duplicate touch
+    // listeners are omitted: they double-fire with pointer events on WebView
+    // and were a source of start/stop races.
+    const onDown = (event) => {
+        if (!event.target.closest(".key")) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        resumeAudio();
+        const index = keyIndexFromPoint(event.clientX, event.clientY);
+        if (index < 0) {
+            return;
+        }
+        if (keyboardEl.setPointerCapture && event.pointerId != null) {
+            try {
+                keyboardEl.setPointerCapture(event.pointerId);
+            } catch (error) {
+                // Pointer capture may fail on some WebViews.
+            }
+        }
+        const prev = pointerKeys.get(event.pointerId);
+        if (prev !== undefined && prev !== index) {
+            stopKey(prev);
+        }
+        pointerKeys.set(event.pointerId, index);
+        startKey(index);
+    };
+
+    const onMove = (event) => {
+        if (!pointerKeys.has(event.pointerId)) {
+            return;
+        }
+        event.preventDefault();
+        const next = keyIndexFromPoint(event.clientX, event.clientY);
+        const prev = pointerKeys.get(event.pointerId);
+        if (next < 0 || next === prev) {
+            return;
+        }
+        stopKey(prev);
+        pointerKeys.set(event.pointerId, next);
+        startKey(next);
+    };
+
+    const onUp = (event) => {
+        if (!pointerKeys.has(event.pointerId)) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const index = pointerKeys.get(event.pointerId);
+        pointerKeys.delete(event.pointerId);
+        if (keyboardEl.releasePointerCapture && event.pointerId != null) {
+            try {
+                keyboardEl.releasePointerCapture(event.pointerId);
+            } catch (error) {
+                // Already released.
+            }
+        }
+        stopKey(index);
+    };
+
+    keyboardEl.addEventListener("pointerdown", onDown);
+    keyboardEl.addEventListener("pointermove", onMove);
+    keyboardEl.addEventListener("pointerup", onUp);
+    keyboardEl.addEventListener("pointercancel", onUp);
 }
 
 function initializeHardware() {
@@ -1177,24 +1282,37 @@ function initializeFallbackInput() {
 }
 
 function initializeNoteOffSafety() {
-    // If the app is backgrounded or the WebView is torn down while keys are
-    // held, the pointer events never fire and notes would ring forever.
-    const stopEngines = () => {
-        allNotesOff();
-        stopLoopPlayback();
-        if (arpTimer) {
-            clearInterval(arpTimer);
-            arpTimer = null;
-        }
-    };
-    const stopIfHidden = () => {
+    // Release stuck notes when the WebView is actually backgrounded, but do
+    // not treat window.blur as "leave" — Android/R1 WebViews fire blur during
+    // side-button, overlays, and focus flicker, which used to kill loops.
+    // Brief hidden blips are ignored so a 50ms visibility flicker does not
+    // cut audio; the playing/arp flags stay set so we resume on return.
+    let hideTimer = null;
+    const HIDE_GRACE_MS = 300;
+
+    const onVisibility = () => {
         if (document.hidden) {
-            stopEngines();
+            if (hideTimer) {
+                clearTimeout(hideTimer);
+            }
+            hideTimer = setTimeout(() => {
+                hideTimer = null;
+                pauseBackgroundAudio();
+            }, HIDE_GRACE_MS);
+            return;
         }
+        if (hideTimer) {
+            clearTimeout(hideTimer);
+            hideTimer = null;
+        }
+        resumeForegroundAudio();
     };
-    window.addEventListener("blur", stopEngines);
-    window.addEventListener("pagehide", stopEngines);
-    document.addEventListener("visibilitychange", stopIfHidden);
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", pauseBackgroundAudio);
+    window.addEventListener("pageshow", resumeForegroundAudio);
+    window.addEventListener("focus", resumeForegroundAudio);
+    document.addEventListener("pointerdown", resumeForegroundAudio);
 }
 
 function saveState() {
@@ -1309,4 +1427,4 @@ async function init() {
 
 document.addEventListener("DOMContentLoaded", () => {
     init();
-});
+});

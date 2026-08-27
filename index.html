@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R1 Creations</title>
+    <style>
+        :root {
+            --bg: #121316;
+            --fg: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+            --pad: rgba(255, 255, 255, 0.08);
+            --pad-border: rgba(255, 255, 255, 0.12);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+            padding: 24px 16px;
+        }
+        main {
+            max-width: 420px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 22px;
+            letter-spacing: 0.04em;
+            margin-bottom: 6px;
+        }
+        p {
+            color: var(--muted);
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        a {
+            display: block;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            border: 1px solid var(--pad-border);
+            border-radius: 8px;
+            background: var(--pad);
+            color: var(--fg);
+            text-decoration: none;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+        }
+        a:hover, a:focus {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        span {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--muted);
+            letter-spacing: 0;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>R1 Creations</h1>
+        <p>Static Rabbit R1 apps. Point a Creation at one of these URLs.</p>
+        <a href="dice/">Dice<span>Roller / coin</span></a>
+        <a href="metronome/">Metronome<span>Tap tempo + beat</span></a>
+        <a href="weather/">Weather<span>Forecast dashboard</span></a>
+        <a href="synth/">Mini Synth<span>Keyboard, FX, loop, arp</span></a>
+    </main>
+</body>
+</html>
