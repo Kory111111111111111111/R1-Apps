@@ -7,6 +7,18 @@
     -webkit-user-select: none;
 }
 
+input,
+textarea,
+button {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+button {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 body {
     width: 240px;
     height: 282px;
@@ -109,6 +121,8 @@ body {
     font-weight: 500;
     color: #cbd5e1;
     margin-bottom: 10px;
+    text-align: center;
+    padding: 0 4px;
 }
 
 .details-row {
@@ -174,6 +188,112 @@ body {
 }
 .daily-temps span:last-child {
     color: #64748b;
+}
+
+/* Location View */
+.location-view {
+    justify-content: flex-start;
+    padding-top: 2px;
+}
+
+.zip-display {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    color: #f8fafc;
+    margin-bottom: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.zip-pad {
+    display: grid;
+    grid-template-columns: repeat(3, 44px);
+    grid-template-rows: repeat(4, 44px);
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.pad-key {
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f1f5f9;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.pad-key:active {
+    background: rgba(56, 189, 248, 0.35);
+    transform: scale(0.96);
+}
+
+.pad-back {
+    font-size: 18px;
+}
+
+.pad-set {
+    font-size: 12px;
+    background: rgba(56, 189, 248, 0.2);
+    color: #38bdf8;
+}
+
+.browser-city-row {
+    display: flex;
+    gap: 4px;
+    width: 100%;
+    margin-top: 2px;
+}
+
+.browser-city-row.hidden {
+    display: none;
+}
+
+.location-input {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #f1f5f9;
+    font-size: 12px;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.location-input::placeholder {
+    color: #64748b;
+}
+
+.city-set-btn {
+    height: 32px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(56, 189, 248, 0.25);
+    color: #38bdf8;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.location-status {
+    font-size: 10px;
+    color: #94a3b8;
+    text-align: center;
+    margin-top: 2px;
+    min-height: 14px;
+    padding: 0 4px;
+}
+
+.location-status.error {
+    color: #f87171;
 }
 
 /* Footer */
