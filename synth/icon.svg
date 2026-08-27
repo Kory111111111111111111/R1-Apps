@@ -1,0 +1,7 @@
+<!-- Mini Synth Creation icon: simple waveform -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Mini Synth">
+  <rect width="512" height="512" rx="96" ry="96" fill="#121316"/>
+  <rect x="18" y="18" width="476" height="476" rx="82" ry="82" fill="none" stroke="#38bdf8" stroke-width="20"/>
+  <path d="M72 300 L120 180 L168 332 L216 148 L264 300 L312 200 L360 280 L408 220 L440 260"
+        fill="none" stroke="#e2e8f0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
