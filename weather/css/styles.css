@@ -38,6 +38,16 @@ body {
     justify-content: space-between;
 }
 
+#app.location-open .main-content {
+    flex: 1;
+    min-height: 0;
+}
+
+#app.location-open .footer {
+    display: none;
+    pointer-events: none;
+}
+
 .header {
     display: flex;
     justify-content: space-between;
@@ -236,11 +246,13 @@ body {
     flex: 1;
     min-height: 0;
     width: 100%;
+    position: relative;
+    z-index: 5;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     grid-template-rows: repeat(4, minmax(32px, 1fr));
     gap: 4px;
-    margin-bottom: 2px;
+    padding-bottom: 8px;
 }
 
 .pad-key {
@@ -350,10 +362,6 @@ body {
 .hint {
     font-size: 10px;
     color: #64748b;
-}
-
-.footer.footer-location .hint {
-    display: none;
 }
 
 .sr-only {

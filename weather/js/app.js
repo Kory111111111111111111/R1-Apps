@@ -41,7 +41,7 @@ const browserCityRowEl = document.getElementById("browserCityRow");
 const cityInputEl = document.getElementById("cityInput");
 const citySetBtnEl = document.getElementById("citySetBtn");
 const locationStatusEl = document.getElementById("locationStatus");
-const footerEl = document.querySelector(".footer");
+const appEl = document.getElementById("app");
 
 function hasPluginHandler() {
     return typeof PluginMessageHandler !== "undefined";
@@ -673,7 +673,7 @@ function setView(index) {
         dot.classList.toggle("active", idx === state.currentViewIndex);
     });
 
-    footerEl.classList.toggle("footer-location", state.currentViewIndex === 3);
+    appEl.classList.toggle("location-open", state.currentViewIndex === 3);
 
     const viewNames = ["Current Weather", "Hourly Forecast", "5-Day Forecast", "Location"];
     statusEl.textContent = `Switched to ${viewNames[state.currentViewIndex]}`;
