@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+    <title>Mini Synth</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <div class="header-main">
+                <div class="title-block">
+                    <span id="waveLabel" class="wave-label">SAW</span>
+                    <span id="octaveLabel" class="octave-label">C3</span>
+                </div>
+                <div class="cutoff-block" aria-label="Filter cutoff">
+                    <div class="cutoff-bar">
+                        <div id="cutoffFill" class="cutoff-fill"></div>
+                    </div>
+                    <span id="cutoffValue" class="cutoff-value">70</span>
+                </div>
+            </div>
+            <div class="octave-row">
+                <button id="octaveDown" class="octave-btn" type="button" aria-label="Lower octave">−</button>
+                <button id="octaveUp" class="octave-btn" type="button" aria-label="Raise octave">+</button>
+            </div>
+        </header>
+
+        <div id="padGrid" class="pad-grid" role="group" aria-label="Note pads">
+            <button class="pad" type="button" data-degree="0" data-label="C">C</button>
+            <button class="pad" type="button" data-degree="2" data-label="D">D</button>
+            <button class="pad" type="button" data-degree="4" data-label="E">E</button>
+            <button class="pad" type="button" data-degree="5" data-label="F">F</button>
+            <button class="pad" type="button" data-degree="7" data-label="G">G</button>
+            <button class="pad" type="button" data-degree="9" data-label="A">A</button>
+            <button class="pad" type="button" data-degree="11" data-label="B">B</button>
+            <button class="pad" type="button" data-degree="12" data-label="C">C</button>
+        </div>
+
+        <p class="hint">scroll: cutoff · side: wave</p>
+        <span id="status" class="sr-only" aria-live="polite"></span>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>
