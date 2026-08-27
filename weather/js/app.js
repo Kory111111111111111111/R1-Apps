@@ -262,35 +262,125 @@ function conditionTextToCode(text) {
     return 1;
 }
 
+/* --- Persistence (creationStorage + localStorage, mirrors dice/metronome) --- */
+
+function utf8ToBase64(str) {
+    const bytes = new TextEncoder().encode(str);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+function base64ToUtf8(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+}
+
+function locationSnapshot() {
+    return {
+        lat: state.lat,
+        lon: state.lon,
+        cityName: state.cityName,
+        zipCode: state.zipCode || "",
+        units: state.units
+    };
+}
+
+function isValidSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+        return false;
+    }
+    if (!Number.isFinite(snapshot.lat) || snapshot.lat < -90 || snapshot.lat > 90) {
+        return false;
+    }
+    if (!Number.isFinite(snapshot.lon) || snapshot.lon < -180 || snapshot.lon > 180) {
+        return false;
+    }
+    if (snapshot.zipCode && !/^\d{5}$/.test(String(snapshot.zipCode))) {
+        return false;
+    }
+    if (snapshot.units && snapshot.units !== "imperial" && snapshot.units !== "metric") {
+        return false;
+    }
+    if (snapshot.cityName != null && typeof snapshot.cityName !== "string") {
+        return false;
+    }
+    return true;
+}
+
+function applySnapshot(snapshot) {
+    state.lat = snapshot.lat;
+    state.lon = snapshot.lon;
+    if (snapshot.cityName) {
+        state.cityName = snapshot.cityName;
+    }
+    if (snapshot.zipCode) {
+        state.zipCode = snapshot.zipCode;
+    }
+    if (snapshot.units === "imperial" || snapshot.units === "metric") {
+        state.units = snapshot.units;
+    }
+}
+
+function parseStoredJson(raw, encoded) {
+    const json = encoded ? base64ToUtf8(raw) : raw;
+    return JSON.parse(json);
+}
+
 async function loadStoredState() {
     try {
-        if (window.creationStorage?.plain) {
-            const raw = await window.creationStorage.plain.getItem(STORAGE_KEY);
-            if (raw) {
-                const parsed = JSON.parse(atob(raw));
-                state = { ...state, ...parsed };
-            }
-        } else {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) {
-                state = { ...state, ...JSON.parse(raw) };
+        if (window.creationStorage && window.creationStorage.plain) {
+            const stored = await window.creationStorage.plain.getItem(STORAGE_KEY);
+            if (stored) {
+                const parsed = parseStoredJson(stored, true);
+                if (isValidSnapshot(parsed)) {
+                    applySnapshot(parsed);
+                    return;
+                }
             }
         }
     } catch (error) {
-        console.warn("Failed to load state", error);
+        console.warn("creationStorage read failed", error);
+    }
+
+    try {
+        const stored = window.localStorage.getItem(STORAGE_KEY);
+        if (!stored) {
+            return;
+        }
+        let parsed;
+        try {
+            parsed = parseStoredJson(stored, false);
+        } catch (rawError) {
+            parsed = parseStoredJson(stored, true);
+        }
+        if (isValidSnapshot(parsed)) {
+            applySnapshot(parsed);
+        }
+    } catch (error) {
+        console.warn("localStorage read failed", error);
     }
 }
 
 async function saveStoredState() {
+    const payload = JSON.stringify(locationSnapshot());
     try {
-        const payload = btoa(JSON.stringify(state));
-        if (window.creationStorage?.plain) {
-            await window.creationStorage.plain.setItem(STORAGE_KEY, payload);
-        } else {
-            localStorage.setItem(STORAGE_KEY, payload);
+        if (window.creationStorage && window.creationStorage.plain) {
+            await window.creationStorage.plain.setItem(STORAGE_KEY, utf8ToBase64(payload));
         }
     } catch (error) {
-        console.warn("Failed to save state", error);
+        console.warn("creationStorage write failed", error);
+    }
+    try {
+        window.localStorage.setItem(STORAGE_KEY, payload);
+    } catch (error) {
+        console.warn("localStorage write failed", error);
     }
 }
 
