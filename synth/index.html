@@ -8,6 +8,7 @@
 </head>
 <body>
     <div id="app">
+        <div id="mainView" class="view">
         <header class="header">
             <div class="header-main">
                 <div class="title-block">
@@ -23,24 +24,106 @@
             </div>
             <div class="octave-row">
                 <button id="octaveDown" class="octave-btn" type="button" aria-label="Lower octave">−</button>
+                <button id="fxBtn" class="fx-btn" type="button" aria-label="Open effects">FX</button>
                 <button id="octaveUp" class="octave-btn" type="button" aria-label="Raise octave">+</button>
             </div>
         </header>
 
-        <div id="padGrid" class="pad-grid" role="group" aria-label="Note pads">
-            <button class="pad" type="button" data-degree="0" data-label="C">C</button>
-            <button class="pad" type="button" data-degree="2" data-label="D">D</button>
-            <button class="pad" type="button" data-degree="4" data-label="E">E</button>
-            <button class="pad" type="button" data-degree="5" data-label="F">F</button>
-            <button class="pad" type="button" data-degree="7" data-label="G">G</button>
-            <button class="pad" type="button" data-degree="9" data-label="A">A</button>
-            <button class="pad" type="button" data-degree="11" data-label="B">B</button>
-            <button class="pad" type="button" data-degree="12" data-label="C">C</button>
+        <div id="keyboard" class="keyboard" role="group" aria-label="One-octave piano keyboard">
+            <div class="white-row">
+                <button class="key white" type="button" data-offset="0" aria-label="C">C</button>
+                <button class="key white" type="button" data-offset="2" aria-label="D">D</button>
+                <button class="key white" type="button" data-offset="4" aria-label="E">E</button>
+                <button class="key white" type="button" data-offset="5" aria-label="F">F</button>
+                <button class="key white" type="button" data-offset="7" aria-label="G">G</button>
+                <button class="key white" type="button" data-offset="9" aria-label="A">A</button>
+                <button class="key white" type="button" data-offset="11" aria-label="B">B</button>
+                <button class="key white" type="button" data-offset="12" aria-label="C">C</button>
+            </div>
+            <div class="black-row">
+                <button class="key black b1" type="button" data-offset="1" aria-label="C sharp">C#</button>
+                <button class="key black b2" type="button" data-offset="3" aria-label="D sharp">D#</button>
+                <button class="key black b3" type="button" data-offset="6" aria-label="F sharp">F#</button>
+                <button class="key black b4" type="button" data-offset="8" aria-label="G sharp">G#</button>
+                <button class="key black b5" type="button" data-offset="10" aria-label="A sharp">A#</button>
+            </div>
         </div>
 
-        <p class="hint">scroll: cutoff · side: wave</p>
+        <p class="hint">scroll: cutoff · side: wave · hold: stop</p>
+        </div>
+
+        <div id="fxView" class="view" hidden>
+            <header class="fx-header">
+                <button id="fxBack" class="back-btn" type="button" aria-label="Back to keyboard">←</button>
+                <div class="fx-tabs" role="tablist" aria-label="Effect pages">
+                    <button id="tabEffects" class="fx-tab is-active" type="button" role="tab" aria-selected="true">FX</button>
+                    <button id="tabAdsr" class="fx-tab" type="button" role="tab" aria-selected="false">ADSR</button>
+                    <button id="tabTunes" class="fx-tab" type="button" role="tab" aria-selected="false">TUNES</button>
+                </div>
+            </header>
+
+            <div id="fxEffects" class="fx-page" role="tabpanel">
+                <button id="fxReverb" class="fx-option" type="button" aria-pressed="false">
+                    <span class="fx-option-name">REVERB</span>
+                    <span id="fxReverbState" class="fx-option-state">OFF</span>
+                </button>
+                <button id="fxDelay" class="fx-option" type="button" aria-pressed="false">
+                    <span class="fx-option-name">DELAY</span>
+                    <span id="fxDelayState" class="fx-option-state">OFF</span>
+                </button>
+                <button id="fxChorus" class="fx-option" type="button" aria-pressed="false">
+                    <span class="fx-option-name">CHORUS</span>
+                    <span id="fxChorusState" class="fx-option-state">OFF</span>
+                </button>
+            </div>
+
+            <div id="fxTunes" class="fx-page" role="tabpanel" hidden>
+                <div class="tunes-section">
+                    <span class="tunes-label">LOOP</span>
+                    <div class="tunes-row">
+                        <button id="loopRec" class="tunes-btn rec" type="button" aria-label="Record loop">● REC</button>
+                        <button id="loopPlay" class="tunes-btn" type="button" aria-label="Play loop">▶ PLAY</button>
+                        <button id="loopClear" class="tunes-btn" type="button" aria-label="Clear loop">CLEAR</button>
+                    </div>
+                    <span id="loopStatus" class="tunes-status">IDLE</span>
+                </div>
+                <div class="tunes-section">
+                    <span class="tunes-label">ARPEGGIATOR</span>
+                    <div class="tunes-row">
+                        <button id="arpToggle" class="tunes-btn" type="button" aria-label="Toggle arpeggiator">ARP: OFF</button>
+                        <button id="arpRate" class="tunes-btn" type="button" aria-label="Arpeggiator rate">RATE 1/8</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="fxAdsr" class="fx-page" role="tabpanel" hidden>
+                <div class="adsr-row" data-param="attack">
+                    <span class="adsr-label">A</span>
+                    <div class="adsr-bar"><div class="adsr-fill"></div></div>
+                    <span class="adsr-value">10ms</span>
+                </div>
+                <div class="adsr-row" data-param="decay">
+                    <span class="adsr-label">D</span>
+                    <div class="adsr-bar"><div class="adsr-fill"></div></div>
+                    <span class="adsr-value">100ms</span>
+                </div>
+                <div class="adsr-row" data-param="sustain">
+                    <span class="adsr-label">S</span>
+                    <div class="adsr-bar"><div class="adsr-fill"></div></div>
+                    <span class="adsr-value">70%</span>
+                </div>
+                <div class="adsr-row" data-param="release">
+                    <span class="adsr-label">R</span>
+                    <div class="adsr-bar"><div class="adsr-fill"></div></div>
+                    <span class="adsr-value">200ms</span>
+                </div>
+            </div>
+
+            <p class="hint">scroll: page · side: back · hold: stop</p>
+        </div>
+
         <span id="status" class="sr-only" aria-live="polite"></span>
     </div>
     <script src="js/app.js"></script>
 </body>
-</html>
+</html>
