@@ -119,3 +119,4 @@ When a request conflicts with the 240×282 Creation model or requires non-SDK na
 - Metronome — `metronome/` (`https://kory111111111111111111.github.io/R1-Apps/metronome/`)
 - Weather — `weather/` (`https://kory111111111111111111.github.io/R1-Apps/weather/`)
 - Mini Synth — `synth/` (`https://kory111111111111111111.github.io/R1-Apps/synth/`)
+- Familiar — `familiar/` (`https://kory111111111111111111.github.io/R1-Apps/familiar/`)

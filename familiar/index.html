@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+    <title>Familiar</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <header class="header">
+            <span id="nameLabel" class="name">Bit</span>
+            <span id="metaLabel" class="meta">D1 EGG</span>
+        </header>
+
+        <div id="stage" class="stage-area">
+            <video id="cam" class="cam" playsinline muted hidden></video>
+            <div id="pet" class="pet is-egg is-round" aria-hidden="true">
+                <span class="spike a"></span>
+                <span class="spike b"></span>
+                <span class="spike c"></span>
+                <span class="ear left"></span>
+                <span class="ear right"></span>
+                <span class="tail"></span>
+                <div class="pet-body">
+                    <span class="crack"></span>
+                    <span class="blush left"></span>
+                    <span class="blush right"></span>
+                    <span class="eye left"></span>
+                    <span class="eye right"></span>
+                    <span class="snout"></span>
+                    <span class="mouth"></span>
+                    <span class="scar"></span>
+                </div>
+                <span class="foot left"></span>
+                <span class="foot right"></span>
+            </div>
+        </div>
+
+        <p id="speech" class="speech" aria-live="polite">Tap FEED to hatch me.</p>
+
+        <div class="meters" aria-hidden="true">
+            <div class="meter">
+                <span>HAP</span>
+                <div class="bar"><div id="barHappy" class="fill"></div></div>
+            </div>
+            <div class="meter">
+                <span>HUN</span>
+                <div class="bar"><div id="barHunger" class="fill"></div></div>
+            </div>
+            <div class="meter">
+                <span>NRG</span>
+                <div class="bar"><div id="barEnergy" class="fill"></div></div>
+            </div>
+        </div>
+
+        <button id="actionBtn" class="action" type="button">FEED</button>
+        <p id="hint" class="hint">scroll: care · side: do · hold: speak</p>
+        <span id="status" class="sr-only" aria-live="polite"></span>
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>
