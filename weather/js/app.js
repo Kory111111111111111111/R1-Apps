@@ -1,6 +1,7 @@
 const STORAGE_KEY = "weatherState";
 const SIDE_CLICK_DEBOUNCE_MS = 120;
 const FETCH_TIMEOUT_MS = 9000;
+const LLM_TIMEOUT_MS = 25000;
 const US_ZIP_RE = /^\d{5}(?:-?\d{4})?$/;
 const ZIP_LENGTH = 5;
 
@@ -41,6 +42,7 @@ const browserCityRowEl = document.getElementById("browserCityRow");
 const cityInputEl = document.getElementById("cityInput");
 const citySetBtnEl = document.getElementById("citySetBtn");
 const locationStatusEl = document.getElementById("locationStatus");
+const appEl = document.getElementById("app");
 
 function hasPluginHandler() {
     return typeof PluginMessageHandler !== "undefined";
@@ -54,13 +56,26 @@ function normalizeZip(query) {
     return String(query).trim().slice(0, ZIP_LENGTH);
 }
 
+function toNumber(value, fallback = NaN) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function stripMarkdownFences(text) {
+    return String(text)
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+}
+
 function parseLlmJson(data) {
     const sources = [data?.data, data?.message].filter((value) => value != null && value !== "");
     for (const source of sources) {
         if (typeof source === "object") {
             return source;
         }
-        const text = String(source).trim();
+        const text = stripMarkdownFences(String(source).trim());
         try {
             return JSON.parse(text);
         } catch (error) {
@@ -97,7 +112,7 @@ function sendLlmRequest(message) {
             pendingLlmReject = null;
             llmTimeoutId = null;
             reject(new Error("LLM timeout"));
-        }, FETCH_TIMEOUT_MS);
+        }, LLM_TIMEOUT_MS);
 
         try {
             PluginMessageHandler.postMessage(JSON.stringify({
@@ -520,12 +535,67 @@ async function fetchWeatherFromOpenMeteo() {
 
 function normalizeLlmWeather(parsed) {
     const windUnit = state.units === "imperial" ? "mph" : "km/h";
+
+    if (parsed.temp != null || parsed.condition != null) {
+        const weatherCode = conditionTextToCode(parsed.condition);
+        const temp = toNumber(parsed.temp);
+        if (!Number.isFinite(temp)) {
+            throw new Error("Invalid LLM weather temp");
+        }
+        const humidity = toNumber(parsed.humidity, 0);
+        const wind = toNumber(parsed.wind, 0);
+
+        const dailyEntries = Array.isArray(parsed.daily) ? parsed.daily.slice(0, 5) : [];
+        const dailyTimes = [];
+        const dailyMax = [];
+        const dailyMin = [];
+        const dailyCodes = [];
+
+        const today = new Date();
+        today.setHours(12, 0, 0, 0);
+
+        if (dailyEntries.length > 0) {
+            dailyEntries.forEach((entry, i) => {
+                const d = new Date(today);
+                d.setDate(d.getDate() + i);
+                dailyTimes.push(d.toISOString());
+                dailyMax.push(toNumber(entry.hi ?? entry.max, temp));
+                dailyMin.push(toNumber(entry.lo ?? entry.min, temp));
+                dailyCodes.push(conditionTextToCode(entry.condition || parsed.condition));
+            });
+        }
+
+        const now = new Date();
+        return {
+            current: {
+                temperature_2m: temp,
+                relative_humidity_2m: humidity,
+                weather_code: weatherCode,
+                wind_speed_10m: wind
+            },
+            current_units: {
+                wind_speed_10m: windUnit
+            },
+            hourly: {
+                time: [now.toISOString()],
+                temperature_2m: [temp],
+                weather_code: [weatherCode]
+            },
+            daily: {
+                time: dailyTimes,
+                temperature_2m_max: dailyMax,
+                temperature_2m_min: dailyMin,
+                weather_code: dailyCodes
+            }
+        };
+    }
+
     const current = parsed.current || {};
     const hourly = parsed.hourly || {};
     const daily = parsed.daily || {};
 
     const weatherCode = current.weather_code != null
-        ? Number(current.weather_code)
+        ? toNumber(current.weather_code, 1)
         : conditionTextToCode(current.condition || parsed.condition);
 
     const hourlyTimes = Array.isArray(hourly.time) ? hourly.time : [];
@@ -537,21 +607,27 @@ function normalizeLlmWeather(parsed) {
     const dailyMin = Array.isArray(daily.temperature_2m_min) ? daily.temperature_2m_min.slice(0, 5) : [];
     const dailyCodes = Array.isArray(daily.weather_code) ? daily.weather_code.slice(0, 5) : [];
 
+    const temp = toNumber(current.temperature_2m ?? current.temp ?? parsed.temp);
+    if (!Number.isFinite(temp)) {
+        throw new Error("Invalid LLM weather temp");
+    }
+
+    const now = new Date();
+    const resolvedHourly = hourlyTimes.length > 0
+        ? { time: hourlyTimes, temperature_2m: hourlyTemps, weather_code: hourlyCodes }
+        : { time: [now.toISOString()], temperature_2m: [temp], weather_code: [weatherCode] };
+
     return {
         current: {
-            temperature_2m: Number(current.temperature_2m ?? current.temp ?? 0),
-            relative_humidity_2m: Number(current.relative_humidity_2m ?? current.humidity ?? 0),
+            temperature_2m: temp,
+            relative_humidity_2m: toNumber(current.relative_humidity_2m ?? current.humidity ?? parsed.humidity, 0),
             weather_code: weatherCode,
-            wind_speed_10m: Number(current.wind_speed_10m ?? current.wind ?? 0)
+            wind_speed_10m: toNumber(current.wind_speed_10m ?? current.wind ?? parsed.wind, 0)
         },
         current_units: {
             wind_speed_10m: current.wind_unit || windUnit
         },
-        hourly: {
-            time: hourlyTimes,
-            temperature_2m: hourlyTemps,
-            weather_code: hourlyCodes
-        },
+        hourly: resolvedHourly,
         daily: {
             time: dailyTimes,
             temperature_2m_max: dailyMax,
@@ -564,7 +640,7 @@ function normalizeLlmWeather(parsed) {
 async function fetchWeatherViaLlm() {
     const tempUnit = state.units === "imperial" ? "Fahrenheit" : "Celsius";
     const windUnit = state.units === "imperial" ? "mph" : "km/h";
-    const message = `Get current weather and a 5-day forecast for ${state.cityName} (latitude ${state.lat}, longitude ${state.lon}). Use ${tempUnit} for temperatures and ${windUnit} for wind. Return ONLY valid JSON in this shape: {"current":{"temperature_2m":0,"relative_humidity_2m":0,"weather_code":0,"wind_speed_10m":0},"hourly":{"time":["ISO"],"temperature_2m":[0],"weather_code":[0]},"daily":{"time":["ISO"],"temperature_2m_max":[0],"temperature_2m_min":[0],"weather_code":[0]}}. weather_code should be a WMO code (0=clear, 1-3=cloudy, 45=fog, 51-65=rain, 71-86=snow, 95-99=thunderstorm).`;
+    const message = `Weather for ${state.cityName} at latitude ${state.lat}, longitude ${state.lon}. Use ${tempUnit} for temperatures and ${windUnit} for wind. Return valid JSON ONLY, no markdown, no explanation. Shape exactly: {"temp":72,"feels":70,"humidity":45,"wind":8,"condition":"clear","daily":[{"day":"Today","hi":80,"lo":62},{"day":"Tomorrow","hi":78,"lo":60}]}. condition must be one of: clear, partly cloudy, cloudy, fog, drizzle, rain, snow, thunderstorm. Up to 5 daily entries with day, hi, lo.`;
     const parsed = await sendLlmRequest(message);
     return normalizeLlmWeather(parsed);
 }
@@ -588,7 +664,6 @@ async function fetchWeather() {
         console.error("Direct weather fetch failed", error);
         if (hasPluginHandler()) {
             try {
-                currentConditionEl.textContent = "Using LLM forecast";
                 weatherCache = await fetchWeatherViaLlm();
                 renderWeather();
                 statusEl.textContent = "Weather updated via LLM";
@@ -600,10 +675,8 @@ async function fetchWeather() {
         }
 
         weatherCache = null;
-        currentConditionEl.textContent = "Weather unavailable";
-        statusEl.textContent = "Set your ZIP on the Location view";
-        setLocationStatus("Could not load weather. Enter a ZIP.", true);
-        setView(3);
+        currentConditionEl.textContent = "Can't load forecast";
+        statusEl.textContent = "Forecast unavailable";
     } finally {
         isFetching = false;
     }
@@ -623,22 +696,29 @@ function renderWeather() {
     detailWindEl.textContent = `W: ${Math.round(curr.wind_speed_10m)} ${windUnit}`;
 
     const hourly = weatherCache.hourly || { time: [], temperature_2m: [], weather_code: [] };
-    const nowIdx = hourly.time.findIndex((t) => new Date(t) >= new Date());
+    const nowIdx = hourly.time.length > 0
+        ? hourly.time.findIndex((t) => new Date(t) >= new Date())
+        : -1;
     const startIdx = nowIdx === -1 ? 0 : nowIdx;
     let hourlyHtml = "";
-    for (let i = startIdx; i < Math.min(hourly.time.length, startIdx + 12); i++) {
-        const timeStr = new Date(hourly.time[i]).toLocaleTimeString([], { hour: "numeric", hour12: true });
-        const temp = Math.round(hourly.temperature_2m[i]);
-        const svgIcon = getWeatherSvg(hourly.weather_code[i]);
-        hourlyHtml += `
+    const hourlyCount = hourly.time.length;
+    if (hourlyCount === 0) {
+        hourlyListEl.innerHTML = "";
+    } else {
+        for (let i = startIdx; i < Math.min(hourly.time.length, startIdx + 12); i++) {
+            const timeStr = new Date(hourly.time[i]).toLocaleTimeString([], { hour: "numeric", hour12: true });
+            const temp = Math.round(hourly.temperature_2m[i]);
+            const svgIcon = getWeatherSvg(hourly.weather_code[i]);
+            hourlyHtml += `
             <div class="hourly-item">
                 <span class="hourly-time">${timeStr}</span>
                 <span class="hourly-icon">${svgIcon}</span>
                 <span class="hourly-temp">${temp}°</span>
             </div>
         `;
+        }
+        hourlyListEl.innerHTML = hourlyHtml;
     }
-    hourlyListEl.innerHTML = hourlyHtml;
 
     const daily = weatherCache.daily || { time: [], temperature_2m_max: [], temperature_2m_min: [], weather_code: [] };
     let dailyHtml = "";
@@ -671,6 +751,8 @@ function setView(index) {
     dots.forEach((dot, idx) => {
         dot.classList.toggle("active", idx === state.currentViewIndex);
     });
+
+    appEl.classList.toggle("location-open", state.currentViewIndex === 3);
 
     const viewNames = ["Current Weather", "Hourly Forecast", "5-Day Forecast", "Location"];
     statusEl.textContent = `Switched to ${viewNames[state.currentViewIndex]}`;
