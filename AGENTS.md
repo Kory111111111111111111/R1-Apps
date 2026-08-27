@@ -10,22 +10,24 @@ Creations are **not** native Android apps. They are HTML/CSS/JS pages constraine
 
 ## Layout
 
-| Path | Role |
-|------|------|
-| `dice/` | First-party Creation: dice / coin roller |
-| `<app-name>/` | Each future Creation gets its **own top-level folder** (sibling of `dice/`) |
-| `creations-sdk-main/` | Upstream rabbit opensource SDK drop (MIT) — **read-only reference** |
-| `creations-sdk-main/plugin-demo/` | Feature demo of SDK APIs (hardware, LLM, TTS, storage) |
-| `creations-sdk-main/plugin-demo/reference/creation-triggers.md` | Canonical SDK API notes — prefer this over guessing |
-| `creations-sdk-main/qr/` | Self-hostable QR helper for Creation links |
+
+| Path                                                            | Role                                                                        |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `dice/`                                                         | First-party Creation: dice / coin roller                                    |
+| `<app-name>/`                                                   | Each future Creation gets its **own top-level folder** (sibling of `dice/`) |
+| `creations-sdk-main/`                                           | Upstream rabbit opensource SDK drop (MIT) — **read-only reference**         |
+| `creations-sdk-main/plugin-demo/`                               | Feature demo of SDK APIs (hardware, LLM, TTS, storage)                      |
+| `creations-sdk-main/plugin-demo/reference/creation-triggers.md` | Canonical SDK API notes — prefer this over guessing                         |
+| `creations-sdk-main/qr/`                                        | Self-hostable QR helper for Creation links                                  |
+
 
 **Do not edit** `creations-sdk-main/` (no fixes, refactors, or “improvements” unless the user explicitly asks). Use it only as documentation and examples. Never put new apps inside the SDK tree.
 
 ## Deployment
 
-Creations are typically **hosted on Netlify** (static publish of the app folder’s files). Keep each app self-contained and static so a Netlify site (or site-per-app / publish-directory) can serve `index.html` and assets with no build step unless the user opts into one.
+Creations are **static files**. Host them on **GitHub Pages**. `.github/workflows/pages.yml` deploys the repo root on every push to `main` (and on manual `workflow_dispatch`). Each app is a folder URL such as `https://kory111111111111111111.github.io/R1-Apps/synth/`. Keep each app self-contained so Pages can serve `index.html` and assets with no build step unless the user opts into one.
 
-When adding or changing an app, preserve relative asset paths that work when that folder is the Netlify publish root.
+When adding or changing an app, preserve relative asset paths that work when that folder is the publish root (`css/`, `js/` next to `index.html`).
 
 ## Stack conventions
 
@@ -34,6 +36,8 @@ When adding or changing an app, preserve relative asset paths that work when tha
 - **Touch**: Prefer ≥44×44px hit targets; keep UI sparse for the tiny screen.
 - **Perf**: Prefer CSS `transform` / `opacity` and CSS transitions; minimize DOM churn; avoid heavy particles/animations (device is constrained).
 - **Desktop preview**: Support click/keyboard fallbacks so apps can be checked in a normal browser; gate R1-only APIs with existence checks.
+
+
 
 ## Creations SDK (do / don’t)
 
@@ -79,12 +83,14 @@ my-app/
 - Persist prefs via `creationStorage.plain` with `localStorage` fallback for browser testing.
 - Wire scroll wheel / side button for primary interactions; touch as secondary.
 
+
+
 ## Verification
 
 There is no Gradle/npm pipeline here. Verify by:
 
 1. Opening the Creation’s `index.html` in a browser (layout + fallback input).
-2. Confirming the Netlify-hosted URL loads the same static assets.
+2. Confirming the hosted URL (GitHub Pages or Netlify) loads the same static assets.
 3. Exercising hardware + storage + LLM paths on an R1 against the deployed URL.
 4. Consulting `plugin-demo` (read-only) when unsure how an SDK API is meant to behave.
 
@@ -97,6 +103,8 @@ State clearly when something was only browser-checked and **not** verified on R1
 - Do not commit secrets; Base64 is encoding, not encryption (secure storage is for that).
 - If SDK docs and demos disagree, call it out and follow the more conservative, working pattern in first-party apps (e.g. `dice/`).
 
+
+
 ## Out of scope
 
 - Modifying `creations-sdk-main/` without an explicit request.
@@ -106,4 +114,8 @@ State clearly when something was only browser-checked and **not** verified on R1
 When a request conflicts with the 240×282 Creation model or requires non-SDK native APIs, stop and ask before implementing.
 
 ## Current Apps:
-- Dice - cerulean-chaja-15bd05.netlify.app
+
+- Dice — `dice/` (`https://kory111111111111111111.github.io/R1-Apps/dice/`)
+- Metronome — `metronome/` (`https://kory111111111111111111.github.io/R1-Apps/metronome/`)
+- Weather — `weather/` (`https://kory111111111111111111.github.io/R1-Apps/weather/`)
+- Mini Synth — `synth/` (`https://kory111111111111111111.github.io/R1-Apps/synth/`)
