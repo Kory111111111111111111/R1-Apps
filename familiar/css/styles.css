@@ -1,9 +1,13 @@
 :root {
-    --bg: #0a0a0a;
+    --bg: #08080a;
     --fg: #f5f5f5;
     --muted: #8a8a8a;
     --accent: #ff6a00;
-    --sad: #64748b;
+    --accent-dim: #c2410c;
+    --accent-glow: rgba(255, 106, 0, 0.4);
+    --gold: #fbbf24;
+    --stage-bg: #0d0d12;
+    --border: #2a201a;
 }
 
 * {
@@ -20,7 +24,7 @@ body {
 }
 
 body {
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
     background: var(--bg);
     color: var(--fg);
     user-select: none;
@@ -33,7 +37,7 @@ body {
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 6px 10px 0;
+    padding: 5px 8px 0;
     position: relative;
 }
 
@@ -42,26 +46,30 @@ body {
     justify-content: space-between;
     align-items: baseline;
     flex-shrink: 0;
-    z-index: 2;
+    z-index: 5;
+    padding: 0 2px 2px;
 }
 
 .name {
-    font-size: 15px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    max-width: 130px;
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 .meta {
     font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
+    font-weight: 800;
+    letter-spacing: 0.08em;
     color: var(--accent);
 }
 
+/* --- Retro LCD Stage Frame --- */
 .stage-area {
     position: relative;
     flex: 1;
@@ -70,7 +78,10 @@ body {
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    border-radius: 10px;
+    border-radius: 8px;
+    background: var(--stage-bg);
+    border: 2px solid rgba(255, 106, 0, 0.35);
+    box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.9), 0 0 6px rgba(255, 106, 0, 0.15);
 }
 
 .cam {
@@ -79,384 +90,176 @@ body {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    opacity: 0.28;
-    filter: grayscale(0.3);
+    opacity: 0.25;
+    filter: grayscale(0.4);
     z-index: 0;
 }
 
+/* --- Particles Layer --- */
+.particles-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+    overflow: hidden;
+}
+
+.particle {
+    position: absolute;
+    font-size: 13px;
+    pointer-events: none;
+    animation: particleFloat 1.2s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+}
+
+@keyframes particleFloat {
+    0% {
+        opacity: 1;
+        transform: translate(0, 0) scale(0.6);
+    }
+    50% {
+        opacity: 0.95;
+        transform: translate(var(--dx, 0px), -18px) scale(1.15);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(var(--dx, 0px), -36px) scale(0.8);
+    }
+}
+
+/* --- Mini-Game Layer --- */
+.game-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    pointer-events: none;
+}
+
+.game-layer[hidden] {
+    display: none !important;
+}
+
+.game-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 900;
+    color: var(--gold);
+    background: rgba(0, 0, 0, 0.7);
+    border-bottom: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.game-arena {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    overflow: hidden;
+}
+
+.falling-item {
+    position: absolute;
+    font-size: 14px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: translate(-50%, 0);
+}
+
+/* --- Pixel Art Pet Canvas --- */
 .pet {
     position: relative;
-    z-index: 1;
-    width: 110px;
-    height: 100px;
+    z-index: 2;
+    width: 96px;
+    height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.12s ease-out;
+}
+
+.pet-canvas {
+    width: 96px;
+    height: 96px;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    display: block;
+}
+
+/* --- Pixel Animation Classes --- */
+.pet.anim-bounce {
+    animation: bounceWin 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes bounceWin {
+    0% { transform: translateY(0) scale(1); }
+    35% { transform: translateY(-14px) scale(1.1, 0.9); }
+    70% { transform: translateY(0) scale(0.95, 1.05); }
+    100% { transform: translateY(0) scale(1); }
+}
+
+.pet.anim-zoomies {
+    animation: zoomies 1.4s ease-in-out;
+}
+
+@keyframes zoomies {
+    0% { transform: translateX(0); }
+    25% { transform: translateX(-35px) scale(1.1, 0.9); }
+    50% { transform: translateX(35px) scale(1.1, 0.9); }
+    75% { transform: translateX(-20px); }
+    100% { transform: translateX(0); }
+}
+
+.pet.anim-tickle {
+    animation: tickleWiggle 0.4s ease-in-out;
+}
+
+@keyframes tickleWiggle {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-8deg) scale(1.05); }
+    75% { transform: rotate(8deg) scale(1.05); }
+}
+
+.pet.anim-panic {
+    animation: panicShake 0.6s ease-in-out infinite;
+}
+
+@keyframes panicShake {
+    0%, 100% { transform: translate(0, 0); }
+    20% { transform: translate(-3px, 2px); }
+    40% { transform: translate(3px, -2px); }
+    60% { transform: translate(-2px, -2px); }
+    80% { transform: translate(2px, 2px); }
+}
+
+/* --- Speech Text --- */
+.speech {
+    min-height: 26px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--fg);
+    text-align: center;
+    margin: 3px 0;
+    z-index: 5;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-.pet-body {
-    position: relative;
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background:
-        radial-gradient(circle at 32% 28%, #5a3a24 0%, transparent 42%),
-        radial-gradient(circle at 50% 70%, #2a1810 0%, #120c08 78%);
-    border: 3px solid var(--accent);
-    z-index: 2;
-    transition: width 0.35s ease, height 0.35s ease, border-radius 0.35s ease;
-}
-
-.ear,
-.spike,
-.foot,
-.scar,
-.blush,
-.tail,
-.snout,
-.crack {
-    position: absolute;
-    pointer-events: none;
-}
-
-.ear {
-    display: none;
-    top: 4px;
-    width: 16px;
-    height: 26px;
-    background: #1a120c;
-    border: 3px solid var(--accent);
-    border-radius: 12px 12px 5px 5px;
-    z-index: 1;
-}
-
-.ear.left { left: 18px; transform: rotate(-22deg); }
-.ear.right { right: 18px; transform: rotate(22deg); }
-.ear.left::after,
-.ear.right::after {
-    content: "";
-    position: absolute;
-    left: 3px;
-    top: 5px;
-    width: 6px;
-    height: 12px;
-    border-radius: 6px;
-    background: rgba(255, 106, 0, 0.45);
-}
-
-.spike {
-    display: none;
-    width: 0;
-    height: 0;
-    border-left: 7px solid transparent;
-    border-right: 7px solid transparent;
-    border-bottom: 16px solid var(--accent);
-    z-index: 1;
-}
-
-.spike.a { top: 0; }
-.spike.b { top: 8px; left: 14px; transform: rotate(-28deg); }
-.spike.c { top: 8px; right: 14px; transform: rotate(28deg); }
-
-.foot {
-    display: none;
-    bottom: 6px;
-    width: 18px;
-    height: 11px;
-    background: var(--accent);
-    border-radius: 7px 7px 4px 4px;
-    z-index: 1;
-}
-
-.foot.left { left: 26px; }
-.foot.right { right: 26px; }
-
-.tail {
-    display: none;
-    right: 6px;
-    bottom: 28px;
-    width: 18px;
-    height: 22px;
-    border: 3px solid var(--accent);
-    border-left: none;
-    border-radius: 0 14px 14px 0;
-    z-index: 0;
-}
-
-.eye {
-    position: absolute;
-    top: 16px;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--fg);
-    box-shadow: inset -2px -2px 0 #111;
-}
-
-.eye.left { left: 10px; }
-.eye.right { right: 10px; }
-
-.snout {
-    display: none;
-    left: 50%;
-    top: 28px;
-    width: 16px;
-    height: 10px;
-    margin-left: -8px;
-    border-radius: 8px;
-    background: rgba(255, 106, 0, 0.28);
-    z-index: 3;
-}
-
-.mouth {
-    position: absolute;
-    left: 50%;
-    bottom: 10px;
-    width: 12px;
-    height: 6px;
-    margin-left: -6px;
-    border-bottom: 2px solid var(--fg);
-    border-radius: 0 0 8px 8px;
-    z-index: 4;
-}
-
-.blush {
-    display: none;
-    top: 28px;
-    width: 7px;
-    height: 4px;
-    border-radius: 4px;
-    background: rgba(255, 106, 0, 0.55);
-}
-
-.blush.left { left: 5px; }
-.blush.right { right: 5px; }
-
-.scar {
-    display: none;
-    top: 8px;
-    right: 8px;
-    width: 10px;
-    height: 14px;
-    border-right: 2px solid #94a3b8;
-    border-bottom: 2px solid #94a3b8;
-    transform: rotate(18deg);
-    opacity: 0.9;
-    z-index: 4;
-}
-
-.crack {
-    display: none;
-    left: 50%;
-    top: 10px;
-    width: 2px;
-    height: 28px;
-    margin-left: -1px;
-    background: linear-gradient(#ff6a00, transparent);
-    clip-path: polygon(40% 0, 100% 18%, 30% 42%, 90% 68%, 20% 100%, 0 70%, 55% 44%, 10% 16%);
-    opacity: 0.85;
-}
-
-/* --- stages --- */
-
-.pet.is-egg .pet-body {
-    width: 42px;
-    height: 56px;
-    border-radius: 50% 50% 50% 50% / 62% 62% 38% 38%;
-    background:
-        radial-gradient(circle at 34% 30%, #4a3424 0%, transparent 46%),
-        radial-gradient(circle at 50% 60%, #2a1c12 0%, #0e0a08 80%);
-}
-
-.pet.is-egg .crack {
-    display: block;
-}
-
-.pet.is-egg .eye {
-    top: 22px;
-    width: 6px;
-    height: 6px;
-}
-
-.pet.is-egg .mouth {
-    bottom: 14px;
-    width: 8px;
-    margin-left: -4px;
-}
-
-.pet.is-baby .pet-body {
-    width: 62px;
-    height: 54px;
-    border-radius: 50% 50% 46% 46%;
-}
-
-.pet.is-baby .ear,
-.pet.is-teen .ear,
-.pet.is-adult .ear {
-    display: block;
-}
-
-.pet.is-baby .ear {
-    top: 10px;
-    width: 13px;
-    height: 20px;
-}
-
-.pet.is-baby .ear.left { left: 22px; }
-.pet.is-baby .ear.right { right: 22px; }
-
-.pet.is-baby .foot,
-.pet.is-teen .foot,
-.pet.is-adult .foot,
-.pet.is-baby .tail,
-.pet.is-teen .tail,
-.pet.is-adult .tail,
-.pet.is-baby .snout,
-.pet.is-teen .snout,
-.pet.is-adult .snout {
-    display: block;
-}
-
-.pet.is-teen .pet-body {
-    width: 66px;
-    height: 72px;
-    border-radius: 34px 34px 28px 28px;
-}
-
-.pet.is-teen .ear {
-    top: 0;
-    height: 28px;
-}
-
-.pet.is-teen .tail {
-    height: 26px;
-    right: 2px;
-}
-
-.pet.is-adult .pet-body {
-    width: 78px;
-    height: 70px;
-    border-radius: 38px 38px 32px 32px;
-}
-
-.pet.is-adult .blush {
-    display: block;
-}
-
-.pet.is-adult .ear {
-    top: -2px;
-    height: 30px;
-}
-
-.pet.is-adult .tail {
-    width: 22px;
-    height: 30px;
-    right: 0;
-    bottom: 22px;
-}
-
-.pet.is-adult .foot {
-    width: 20px;
-}
-
-/* --- care-shaped body (never flatten the egg) --- */
-
-.pet:not(.is-egg).is-tall .pet-body {
-    width: 48px;
-    height: 78px;
-    border-radius: 24px;
-}
-
-.pet.is-tall.is-adult .pet-body {
-    width: 54px;
-    height: 86px;
-}
-
-.pet.is-tall .ear {
-    top: -6px;
-}
-
-.pet:not(.is-egg).is-spiky .spike {
-    display: block;
-}
-
-.pet:not(.is-egg).is-spiky .ear {
-    display: none;
-}
-
-/* --- mood / trait --- */
-
-.pet.is-sleeping .eye {
-    height: 2px;
-    border-radius: 1px;
-    top: 24px;
-}
-
-.pet.is-sad .mouth,
-.pet.is-sick .mouth {
-    border-bottom: none;
-    border-top: 2px solid var(--fg);
-    height: 6px;
-    bottom: 10px;
-}
-
-.pet.is-sad .pet-body,
-.pet.is-sick .pet-body {
-    border-color: var(--sad);
-}
-
-.pet.is-sick {
-    opacity: 0.82;
-}
-
-.pet.is-scarred .scar {
-    display: block;
-}
-
-.pet.trait-nocturnal .pet-body {
-    background: radial-gradient(circle at 35% 30%, #24182a 0%, #0c0a12 70%);
-}
-
-.pet.trait-fussy .mouth {
-    width: 8px;
-    margin-left: -4px;
-}
-
-.pet.trait-clingy .eye.left { left: 14px; }
-.pet.trait-clingy .eye.right { right: 14px; }
-
-.pet.trait-chill .eye {
-    height: 5px;
-    border-radius: 4px;
-    box-shadow: none;
-}
-
-.pet:not(.is-egg):not(.is-sleeping) {
-    animation: idle 2.6s ease-in-out infinite;
-}
-
-@keyframes idle {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-3px); }
-}
-
-.speech {
-    min-height: 28px;
-    font-size: 11px;
-    line-height: 1.25;
-    color: var(--fg);
-    text-align: center;
-    margin: 4px 0;
-    z-index: 2;
-}
-
+/* --- Segmented Pixel Stat Meters --- */
 .meters {
     display: flex;
     flex-direction: column;
     gap: 3px;
-    margin-bottom: 5px;
+    margin-bottom: 4px;
     flex-shrink: 0;
-    z-index: 2;
+    z-index: 5;
 }
 
 .meter {
@@ -466,48 +269,64 @@ body {
 }
 
 .meter span {
-    width: 26px;
+    width: 24px;
     font-size: 9px;
-    font-weight: 700;
+    font-weight: 800;
     letter-spacing: 0.05em;
     color: var(--muted);
 }
 
-.bar {
+.pixel-bar {
+    display: flex;
+    gap: 2px;
     flex: 1;
-    height: 6px;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.1);
-    overflow: hidden;
+    height: 7px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 1px;
+    border-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.fill {
+.seg {
+    flex: 1;
     height: 100%;
-    width: 50%;
-    background: var(--accent);
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 1px;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
+.seg.is-filled {
+    background: var(--accent);
+    box-shadow: 0 0 3px rgba(255, 106, 0, 0.6);
+}
+
+/* --- Action Button --- */
 .action {
-    min-height: 44px;
-    border: 1px solid rgba(255, 106, 0, 0.5);
-    border-radius: 8px;
+    min-height: 42px;
+    border: 1px solid rgba(255, 106, 0, 0.6);
+    border-radius: 7px;
     background: rgba(255, 106, 0, 0.16);
     color: var(--accent);
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.1em;
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
     cursor: pointer;
     flex-shrink: 0;
-    z-index: 2;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
 }
 
 .action:active {
-    background: rgba(255, 106, 0, 0.32);
+    background: rgba(255, 106, 0, 0.35);
+    transform: scale(0.98);
 }
 
 .hint {
-    height: 22px;
+    height: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -515,6 +334,7 @@ body {
     font-size: 9px;
     letter-spacing: 0.02em;
     flex-shrink: 0;
+    z-index: 5;
 }
 
 .sr-only {
@@ -526,11 +346,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pet-body {
-        transition: none;
-    }
-
-    .pet:not(.is-egg):not(.is-sleeping) {
-        animation: none;
-    }
+    .pet { animation: none !important; }
+    .particle { animation: none !important; }
 }

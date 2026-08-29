@@ -9,48 +9,45 @@
 <body>
     <div id="app">
         <header class="header">
-            <span id="nameLabel" class="name">Bit</span>
+            <span id="nameLabel" class="name">BIT</span>
             <span id="metaLabel" class="meta">D1 EGG</span>
         </header>
 
         <div id="stage" class="stage-area">
             <video id="cam" class="cam" playsinline muted hidden></video>
-            <div id="pet" class="pet is-egg is-round" aria-hidden="true">
-                <span class="spike a"></span>
-                <span class="spike b"></span>
-                <span class="spike c"></span>
-                <span class="ear left"></span>
-                <span class="ear right"></span>
-                <span class="tail"></span>
-                <div class="pet-body">
-                    <span class="crack"></span>
-                    <span class="blush left"></span>
-                    <span class="blush right"></span>
-                    <span class="eye left"></span>
-                    <span class="eye right"></span>
-                    <span class="snout"></span>
-                    <span class="mouth"></span>
-                    <span class="scar"></span>
+            
+            <!-- Particle animation layer -->
+            <div id="particlesLayer" class="particles-layer" aria-hidden="true"></div>
+
+            <!-- Mini-game play layer -->
+            <div id="gameLayer" class="game-layer" hidden aria-hidden="true">
+                <div class="game-header">
+                    <span id="gameScoreLabel" class="game-score">00 PTS</span>
+                    <span id="gameTimerLabel" class="game-timer">10s</span>
                 </div>
-                <span class="foot left"></span>
-                <span class="foot right"></span>
+                <div id="gameArena" class="game-arena"></div>
+            </div>
+
+            <!-- Tamagotchi Pixel Art Character -->
+            <div id="pet" class="pet" aria-hidden="true">
+                <canvas id="petCanvas" width="32" height="32" class="pet-canvas"></canvas>
             </div>
         </div>
 
         <p id="speech" class="speech" aria-live="polite">Tap FEED to hatch me.</p>
 
-        <div class="meters" aria-hidden="true">
-            <div class="meter">
+        <div class="meters" role="region" aria-label="Status meters">
+            <div id="meterHappy" class="meter" role="progressbar" aria-label="Happiness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="70">
                 <span>HAP</span>
-                <div class="bar"><div id="barHappy" class="fill"></div></div>
+                <div id="barHappy" class="pixel-bar"></div>
             </div>
-            <div class="meter">
+            <div id="meterHunger" class="meter" role="progressbar" aria-label="Hunger" aria-valuemin="0" aria-valuemax="100" aria-valuenow="70">
                 <span>HUN</span>
-                <div class="bar"><div id="barHunger" class="fill"></div></div>
+                <div id="barHunger" class="pixel-bar"></div>
             </div>
-            <div class="meter">
+            <div id="meterEnergy" class="meter" role="progressbar" aria-label="Energy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="80">
                 <span>NRG</span>
-                <div class="bar"><div id="barEnergy" class="fill"></div></div>
+                <div id="barEnergy" class="pixel-bar"></div>
             </div>
         </div>
 
