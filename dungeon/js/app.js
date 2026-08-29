@@ -1404,10 +1404,10 @@
 
     function initializeHardware() {
         window.addEventListener("scrollUp", function () {
-            onScroll(-1);
+            onScroll(1);
         });
         window.addEventListener("scrollDown", function () {
-            onScroll(1);
+            onScroll(-1);
         });
         window.addEventListener("sideClick", onSideClick);
         window.addEventListener("longPressStart", onLongPress);
