@@ -3,29 +3,87 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
-    <title>Familiar</title>
+    <title>Familiar - Tamagotchi Companion</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
     <div id="app">
         <header class="header">
             <span id="nameLabel" class="name">BIT</span>
-            <span id="metaLabel" class="meta">D1 EGG</span>
+            <span id="metaLabel" class="meta">GEN 1 · D1 EGG</span>
         </header>
 
         <div id="stage" class="stage-area">
             <video id="cam" class="cam" playsinline muted hidden></video>
             
-            <!-- Particle animation layer -->
+            <!-- Mess / Poop Layer -->
+            <div id="poopLayer" class="poop-layer" aria-hidden="true"></div>
+
+            <!-- Bubble Wash Animation Layer -->
+            <div id="cleanLayer" class="clean-layer" hidden aria-hidden="true"></div>
+
+            <!-- Particle Animation Layer -->
             <div id="particlesLayer" class="particles-layer" aria-hidden="true"></div>
 
-            <!-- Mini-game play layer -->
+            <!-- Catch Mini-Game Layer -->
             <div id="gameLayer" class="game-layer" hidden aria-hidden="true">
                 <div class="game-header">
                     <span id="gameScoreLabel" class="game-score">00 PTS</span>
                     <span id="gameTimerLabel" class="game-timer">10s</span>
                 </div>
                 <div id="gameArena" class="game-arena"></div>
+            </div>
+
+            <!-- Rhythm Mini-Game Layer -->
+            <div id="rhythmLayer" class="rhythm-layer" hidden aria-hidden="true">
+                <div class="rhythm-header">
+                    <span id="rhythmScoreLabel" class="game-score">000 PTS</span>
+                    <span id="rhythmComboLabel" class="rhythm-combo">x0</span>
+                </div>
+                <div class="rhythm-track" id="rhythmTrack">
+                    <div class="rhythm-target" id="rhythmTarget"></div>
+                </div>
+                <div id="rhythmFeedback" class="rhythm-feedback"></div>
+            </div>
+
+            <!-- Passport / ID Stats Overlay -->
+            <div id="passportOverlay" class="passport-overlay" hidden aria-hidden="true">
+                <div class="passport-card">
+                    <div class="passport-header">
+                        <span id="passName" class="pass-name">BIT</span>
+                        <span id="passGen" class="pass-gen">GEN 1</span>
+                    </div>
+                    <div class="passport-body">
+                        <div class="pass-row">
+                            <span class="pass-label">SPECIES</span>
+                            <span id="passSpecies" class="pass-val">LUNAR BUNNY</span>
+                        </div>
+                        <div class="pass-row">
+                            <span class="pass-label">TRAIT</span>
+                            <span id="passTrait" class="pass-val">CHILL</span>
+                        </div>
+                        <div class="pass-row">
+                            <span class="pass-label">AGE / BOND</span>
+                            <span id="passAgeBond" class="pass-val">DAY 1 · 85%</span>
+                        </div>
+                        <div class="pass-row">
+                            <span class="pass-label">FAV SNACK</span>
+                            <span id="passFavFood" class="pass-val">🍓 BERRY</span>
+                        </div>
+                        <div class="pass-row">
+                            <span class="pass-label">DISCIPLINE</span>
+                            <span id="passDiscipline" class="pass-val">★★★☆☆</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings / Wipe Confirmation Overlay -->
+            <div id="settingsOverlay" class="settings-overlay" hidden aria-hidden="true">
+                <div class="settings-card" id="settingsCard">
+                    <div class="settings-title" id="settingsTitle">SETTINGS</div>
+                    <div class="settings-content" id="settingsContent"></div>
+                </div>
             </div>
 
             <!-- Tamagotchi Pixel Art Character -->
@@ -36,7 +94,7 @@
 
         <p id="speech" class="speech" aria-live="polite">Tap FEED to hatch me.</p>
 
-        <div class="meters" role="region" aria-label="Status meters">
+        <div id="meters" class="meters" role="region" aria-label="Status meters">
             <div id="meterHappy" class="meter" role="progressbar" aria-label="Happiness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="70">
                 <span>HAP</span>
                 <div id="barHappy" class="pixel-bar"></div>
