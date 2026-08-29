@@ -1,4 +1,5 @@
 const STORAGE_KEY = "familiarState";
+const SNAPSHOT_VERSION = 1;
 const SIDE_CLICK_DEBOUNCE_MS = 120;
 const LLM_TIMEOUT_MS = 20000;
 const SPEAK_COOLDOWN_MS = 15000;
@@ -6,6 +7,9 @@ const MAX_DECAY_HOURS = 24;
 const NAME_MAX = 8;
 const SIGN_LEN = 3;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ- ";
+const MIC_AUTO_STOP_MS = 300000;
+const ALERT_COOLDOWN_MS = 180000;
+const IDLE_HOP_MS = 21000;
 
 const SPECIES_LIST = [
     { id: "bunny", name: "LUNAR BUNNY", desc: "Swift, energetic, long floppy ears.", icon: "🐰" },
@@ -17,6 +21,20 @@ const SPECIES_LIST = [
 
 const TRAITS = ["chill", "nocturnal", "fussy", "clingy", "brave", "curious"];
 const ACTIONS = ["FEED", "PLAY", "TRAIN", "CLEAN", "HEAL", "WALK", "BAG", "SLEEP", "SIGN", "STATS", "SETTINGS"];
+const ACTION_HINTS = {
+    FEED: "Serve snacks. The first feed hatches the egg!",
+    PLAY: "Mini-games for happiness and bond.",
+    TRAIN: "Perform tricks to raise discipline.",
+    CLEAN: "Scrub away messes with bubbles.",
+    HEAL: "Cure sickness, restore vitality.",
+    WALK: "Forage for rare artifacts.",
+    BAG: "Browse your artifact collection.",
+    SLEEP: "Tuck in to restore energy.",
+    SIGN: "Your secret handshake ritual.",
+    STATS: "View the pet passport.",
+    SETTINGS: "Sound, camera, name, reset."
+};
+const GAME_HINTS = ["Catch falling berries, dodge bombs!", "Tap the side button on the beat!"];
 const STAGES = ["EGG", "BABY", "TEEN", "ADULT", "ASCENDED"];
 
 const TRICKS = [
@@ -110,6 +128,7 @@ const PALETTES = {
 };
 
 // DOM Elements
+const stageAreaEl = document.getElementById("stage");
 const petEl = document.getElementById("pet");
 const petCanvas = document.getElementById("petCanvas");
 const nameLabelEl = document.getElementById("nameLabel");
@@ -173,6 +192,8 @@ let micTimer = null;
 let micStream = null;
 let micSource = null;
 let micAnalyser = null;
+let micStartedAt = 0;
+let micWasActive = false;
 let audioCtx = null;
 let lastMicBoostAt = 0;
 let micMuteUntil = 0;
@@ -180,6 +201,9 @@ let liveTickTimer = null;
 let animTimeout = null;
 let spriteAnimFrame = 0;
 let spriteAnimTimer = null;
+let spriteLoopMs = 0;
+let idleTimer = null;
+let lastAlertAt = 0;
 
 // Catch Mini-Game state
 let gameActive = false;
@@ -189,15 +213,15 @@ let gameInterval = null;
 let gameSpawnInterval = null;
 let gamePetX = 0;
 let gameItems = [];
+let gameLastTs = 0;
 
 // Rhythm Mini-Game state
 let rhythmActive = false;
 let rhythmScore = 0;
 let rhythmCombo = 0;
 let rhythmNotes = [];
-let rhythmInterval = null;
 let rhythmSpawnInterval = null;
-let rhythmAnimFrame = null;
+let rhythmLastTs = 0;
 
 let pendingLlmResolve = null;
 let pendingLlmReject = null;
@@ -230,7 +254,9 @@ const state = {
     favFood: "berry",
     dislikeFood: "pepper",
     camPref: false,
-    highScores: { catch: 0, rhythm: 0 }
+    highScores: { catch: 0, rhythm: 0 },
+    stageReached: 0,
+    speciesRevealed: false
 };
 
 function clamp(value, min, max) {
@@ -302,6 +328,112 @@ function hatchIfNeeded() {
     spawnParticle("💖", -15, -20);
     spawnParticle("🐣", 15, -20);
     sfxWin();
+}
+
+function requireHatched(hint) {
+    if (state.hatched) return true;
+    chirp(300, 0.06);
+    say(hint || "An egg… FEED me first to hatch!");
+    return false;
+}
+
+function isNightHour() {
+    const h = new Date().getHours();
+    return h >= 20 || h < 6;
+}
+
+function menuTick() {
+    chirp(600, 0.03);
+}
+
+function celebrateStage(idx) {
+    const spec = SPECIES_LIST.find((s) => s.id === state.species) || SPECIES_LIST[0];
+    const overlayMode = mode === "stats" || mode === "settings" || mode === "wipe_confirm";
+    sfxWin();
+    if (!overlayMode) {
+        playAnim("anim-zoomies", 1400);
+        spawnParticle("✨", -12, -22);
+        spawnParticle("⭐", 0, -14);
+        spawnParticle("🎉", 12, -22);
+    }
+    if (idx === 1) {
+        say("I'm a " + STAGES[idx] + " now!");
+    } else if (idx >= 2) {
+        say("Evolved! I'm a " + spec.name + "! ✨");
+    } else {
+        say("Grew to " + STAGES[idx] + "!");
+    }
+}
+
+function checkGrowth(canCelebrate) {
+    if (!state.hatched) return false;
+    const idx = currentStageIndex();
+    let announced = false;
+    if (idx > (state.stageReached || 0)) {
+        state.stageReached = idx;
+        if (canCelebrate) {
+            celebrateStage(idx);
+            announced = true;
+        }
+        saveState();
+    }
+    if (idx >= 2 && !state.speciesRevealed) {
+        state.speciesRevealed = true;
+        if (canCelebrate && !announced) {
+            const spec = SPECIES_LIST.find((s) => s.id === state.species) || SPECIES_LIST[0];
+            sfxWin();
+            spawnParticle("✨", -12, -22);
+            playAnim("anim-bounce", 800);
+            say("By the way — I'm a " + spec.name + "!");
+            announced = true;
+        }
+        saveState();
+    }
+    return announced;
+}
+
+function checkNeedsAlert() {
+    if (!state.hatched || state.sleeping) return;
+    const now = Date.now();
+    if (now - lastAlertAt < ALERT_COOLDOWN_MS) return;
+    let line = null;
+    if (state.isSick) {
+        line = state.name + " feels really sick… HEAL me!";
+    } else if (state.poops >= 2) {
+        line = "So messy in here! CLEAN please!";
+    } else if (state.hunger < 20) {
+        line = "So hungry… FEED me please!";
+    } else if (state.happiness < 20) {
+        line = "So bored… PLAY with me?";
+    } else if (state.energy < 20) {
+        line = "Exhausted… time for SLEEP?";
+    } else if (state.poops > 0) {
+        line = "Eww, a mess! CLEAN it up?";
+    }
+    if (!line) return;
+    lastAlertAt = now;
+    playAnim("anim-panic", 900);
+    chirp(220, 0.1);
+    chirp(180, 0.12, 0.14);
+    spawnParticle("❗", 0, -25);
+    say(line);
+}
+
+function startIdleLoop() {
+    if (idleTimer) clearInterval(idleTimer);
+    idleTimer = setInterval(() => {
+        if (document.hidden || mode !== "care") return;
+        if (!state.hatched || state.sleeping || state.isSick) return;
+        if (moodId() !== "ok") return;
+        if (Math.random() < 0.45) playAnim("anim-bounce", 600);
+    }, IDLE_HOP_MS);
+}
+
+function stopIdleLoop() {
+    if (idleTimer) {
+        clearInterval(idleTimer);
+        idleTimer = null;
+    }
 }
 
 // ==========================================
@@ -852,7 +984,9 @@ function renderPixelSprite() {
     const matrix = spriteList[frameIdx] || spriteList[0];
     const rows = matrix.length;
     const cols = matrix[0].length;
-    const offsetX = Math.floor((32 - cols) / 2);
+    // Egg wobble: the two egg frames are identical, so lean 1px on the off-beat
+    const sway = (stageName === "EGG" && frameIdx === 1 && !state.sleeping) ? 1 : 0;
+    const offsetX = Math.floor((32 - cols) / 2) + sway;
     const offsetY = Math.floor((32 - rows) / 2);
 
     for (let r = 0; r < rows; r += 1) {
@@ -882,11 +1016,20 @@ function renderPixelSprite() {
 }
 
 function startSpriteLoop() {
+    const wantMs = state.sleeping ? 1600 : 750;
+    if (spriteAnimTimer && spriteLoopMs === wantMs) return;
     if (spriteAnimTimer) clearInterval(spriteAnimTimer);
+    spriteLoopMs = wantMs;
     spriteAnimTimer = setInterval(() => {
         spriteAnimFrame = (spriteAnimFrame + 1) % 2;
         renderPixelSprite();
-    }, 750);
+    }, wantMs);
+}
+
+function stopSpriteLoop() {
+    if (spriteAnimTimer) clearInterval(spriteAnimTimer);
+    spriteAnimTimer = null;
+    spriteLoopMs = 0;
 }
 
 function renderPixelBar(containerEl, value) {
@@ -1129,7 +1272,7 @@ function localLine() {
         return who + " missed you. Play with me?";
     }
     if (stage === "EGG") {
-        return "Tap FEED to hatch your companion!";
+        return "Press the SIDE button to hatch me!";
     }
     if (stage === "ASCENDED") {
         return who + " is an Ascended Legend! ✨";
@@ -1274,6 +1417,10 @@ function internPrompt() {
 
 function render() {
     const stage = STAGES[currentStageIndex()];
+    if (document.body) document.body.classList.toggle("is-sleeping", !!state.sleeping);
+    if (stageAreaEl) stageAreaEl.classList.toggle("is-night", isNightHour());
+    startSpriteLoop();
+
     if (nameLabelEl) nameLabelEl.textContent = mode === "name" ? (nameDraft || "_") : state.name;
     if (metaLabelEl) metaLabelEl.textContent = `GEN ${state.generation} · D${dayNumber()} ${stage}`;
 
@@ -1287,7 +1434,7 @@ function render() {
 
     if (mode === "name") {
         if (actionBtnEl) actionBtnEl.textContent = LETTERS[letterIndex];
-        if (hintEl) hintEl.textContent = "scroll: letter · side: add · hold: save";
+        if (hintEl) hintEl.textContent = "scroll · side: add · shake: del · hold: save";
     } else if (mode === "food") {
         const f = FOODS[foodIndex];
         if (actionBtnEl) actionBtnEl.textContent = f.name;
@@ -1306,15 +1453,15 @@ function render() {
         const trick = TRICKS[trainIndex];
         const unlocked = state.bond >= trick.bondReq;
         if (actionBtnEl) actionBtnEl.textContent = (unlocked ? "DO " : "🔒 ") + trick.name;
-        if (hintEl) hintEl.textContent = unlocked ? `${trick.desc} · hold: back` : `Needs ${trick.bondReq}% Bond · hold: back`;
+        if (hintEl) hintEl.textContent = unlocked ? "side: do · hold: back" : `needs ${trick.bondReq}% bond · hold: back`;
     } else if (mode === "bag") {
         if (!state.bag || state.bag.length === 0) {
             if (actionBtnEl) actionBtnEl.textContent = "EMPTY BAG";
-            if (hintEl) hintEl.textContent = "forage on WALK · hold: back";
+            if (hintEl) hintEl.textContent = "forage on WALK · side: back";
         } else {
             const item = ARTIFACTS.find((a) => a.id === state.bag[bagIndex]) || ARTIFACTS[0];
             if (actionBtnEl) actionBtnEl.textContent = item.icon + " " + item.name;
-            if (hintEl) hintEl.textContent = item.rarity + " " + (bagIndex + 1) + "/" + state.bag.length + " · hold: back";
+            if (hintEl) hintEl.textContent = item.rarity + " " + (bagIndex + 1) + "/" + state.bag.length + " · side: back";
         }
     } else if (mode === "sign") {
         if (actionBtnEl) actionBtnEl.textContent = signBuffer.length + "/" + SIGN_LEN;
@@ -1331,7 +1478,11 @@ function render() {
         renderWipeConfirm();
     } else {
         if (actionBtnEl) actionBtnEl.textContent = ACTIONS[actionIndex];
-        if (hintEl) hintEl.textContent = "scroll: care · side: do · hold: speak";
+        if (hintEl) {
+            hintEl.textContent = state.hatched
+                ? "scroll: pick · side: do · hold: speak · " + (actionIndex + 1) + "/" + ACTIONS.length
+                : "FEED ready — press SIDE to hatch!";
+        }
     }
 
     renderPixelBar(barHappyEl, state.happiness);
@@ -1357,6 +1508,9 @@ function renderPassport() {
     if (passFavFoodEl) passFavFoodEl.textContent = fav.name;
     const stars = Math.min(5, Math.max(1, Math.round(state.discipline / 20)));
     if (passDisciplineEl) passDisciplineEl.textContent = "★".repeat(stars) + "☆".repeat(5 - stars);
+    const hs = state.highScores || { catch: 0, rhythm: 0 };
+    const scoresEl = document.getElementById("passScores");
+    if (scoresEl) scoresEl.textContent = "C " + (hs.catch || 0) + " · R " + (hs.rhythm || 0);
 }
 
 function renderSettings() {
@@ -1408,7 +1562,7 @@ function renderWipeConfirm() {
 
     actionBtnEl.textContent = wipeConfirmChoice === 1 ? "CONFIRM WIPE" : "CANCEL";
     if (wipeConfirmChoice === 1) actionBtnEl.classList.add("is-danger");
-    hintEl.textContent = "scroll: choice · side: execute";
+    if (hintEl) hintEl.textContent = "scroll: choice · side: execute";
 }
 
 function say(text) {
@@ -1432,11 +1586,15 @@ function petPetting() {
 
 // --- Feeding ---
 function enterFoodMenu() {
+    const justHatched = !state.hatched;
     hatchIfNeeded();
     mode = "food";
     foodIndex = 0;
     render();
-    say(FOODS[foodIndex].desc);
+    say(justHatched
+        ? "CRACK! " + state.name + " hatched! 🐣 Pick my first meal!"
+        : FOODS[foodIndex].desc);
+    if (justHatched) checkGrowth(false);
 }
 
 function feedSelectedFood() {
@@ -1490,7 +1648,7 @@ function feedSelectedFood() {
 
 // --- Clean Bath Activity ---
 function doCleanAction() {
-    hatchIfNeeded();
+    if (!requireHatched()) return;
     state.sleeping = false;
     state.care.clean += 1;
     state.poops = 0;
@@ -1509,7 +1667,7 @@ function doCleanAction() {
 
 // --- Heal / Clinic Activity ---
 function doHealAction() {
-    hatchIfNeeded();
+    if (!requireHatched()) return;
     state.sleeping = false;
     state.care.heal += 1;
     state.isSick = false;
@@ -1532,11 +1690,11 @@ function doHealAction() {
 
 // --- Train & Tricks ---
 function enterTrainMenu() {
-    hatchIfNeeded();
+    if (!requireHatched()) return;
     mode = "train";
     trainIndex = 0;
     render();
-    say("Select a trick to perform!");
+    say(TRICKS[0].desc);
 }
 
 function doTrainTrick() {
@@ -1562,7 +1720,7 @@ function doTrainTrick() {
 
 // --- Mini-Games Hub ---
 function enterPlaySelect() {
-    hatchIfNeeded();
+    if (!requireHatched()) return;
     if (state.energy < 10) {
         say("Too exhausted to play! Nap first?");
         return;
@@ -1570,7 +1728,7 @@ function enterPlaySelect() {
     mode = "play_select";
     playSelectIndex = 0;
     render();
-    say("Choose a mini-game!");
+    say(GAME_HINTS[0]);
 }
 
 function startChosenGame() {
@@ -1589,6 +1747,7 @@ function startCatchGame() {
     gameTimer = 10;
     gamePetX = 0;
     gameItems = [];
+    gameLastTs = 0;
     state.sleeping = false;
     state.care.play += 1;
     state.energy = clamp(state.energy - 10, 0, 100);
@@ -1626,7 +1785,8 @@ function spawnGameItem() {
 
     const item = {
         el: document.createElement("div"),
-        x: Math.floor(Math.random() * 180 + 20),
+        // Keep spawns inside the pet's reachable band (clamp ±48 around x=110, ±26 catch radius)
+        x: Math.floor(Math.random() * 140 + 40),
         y: 0,
         speed: 2.2 + Math.random() * 1.5,
         type: type,
@@ -1641,13 +1801,16 @@ function spawnGameItem() {
     gameItems.push(item);
 }
 
-function updateCatchGame() {
+function updateCatchGame(ts) {
     if (!gameActive) return;
+    const dtMs = gameLastTs ? Math.min(50, ts - gameLastTs) : 16.7;
+    gameLastTs = ts;
+    const step = dtMs / 16.7;
     const petStageX = 110 + gamePetX;
 
     for (let i = gameItems.length - 1; i >= 0; i -= 1) {
         const item = gameItems[i];
-        item.y += item.speed;
+        item.y += item.speed * step;
         item.el.style.top = item.y + "px";
 
         if (item.y > 55 && item.y < 90 && Math.abs(item.x - petStageX) < 26) {
@@ -1715,6 +1878,7 @@ function startRhythmGame() {
     rhythmScore = 0;
     rhythmCombo = 0;
     rhythmNotes = [];
+    rhythmLastTs = 0;
     state.sleeping = false;
     state.care.play += 1;
     state.energy = clamp(state.energy - 10, 0, 100);
@@ -1756,12 +1920,15 @@ function spawnRhythmNote() {
     rhythmNotes.push(note);
 }
 
-function updateRhythmGame() {
+function updateRhythmGame(ts) {
     if (!rhythmActive) return;
+    const dtMs = rhythmLastTs ? Math.min(50, ts - rhythmLastTs) : 16.7;
+    rhythmLastTs = ts;
+    const step = dtMs / 16.7;
 
     for (let i = rhythmNotes.length - 1; i >= 0; i -= 1) {
         const note = rhythmNotes[i];
-        note.y += note.speed;
+        note.y += note.speed * step;
         note.el.style.top = note.y + "px";
 
         if (note.y > 90) {
@@ -1847,7 +2014,7 @@ function endRhythmGame() {
 
 // --- Walk / Foraging ---
 function doWalkAction() {
-    hatchIfNeeded();
+    if (!requireHatched()) return;
     if (state.energy < 12) {
         say("Too tired for a walk. Nap first?");
         return;
@@ -1882,7 +2049,7 @@ function doWalkAction() {
 
 // --- Backpack Collection ---
 function enterBagView() {
-    hatchIfNeeded();
+    if (!requireHatched()) return;
     mode = "bag";
     bagIndex = 0;
     render();
@@ -1924,12 +2091,12 @@ function doCareAction() {
     if (action === "WALK") { doWalkAction(); return; }
     if (action === "BAG") { enterBagView(); return; }
     if (action === "SIGN") { enterSign(); return; }
-    if (action === "STATS") { mode = "stats"; render(); say("Viewing Pet Passport."); return; }
-    if (action === "SETTINGS") { mode = "settings"; settingsIndex = 0; render(); say("Settings Menu."); return; }
+    if (action === "STATS") { mode = "stats"; render(); say(ACTION_HINTS.STATS); return; }
+    if (action === "SETTINGS") { mode = "settings"; settingsIndex = 0; render(); say(ACTION_HINTS.SETTINGS); return; }
 
-    startMic();
     if (action === "SLEEP") {
-        hatchIfNeeded();
+        if (!requireHatched()) return;
+        startMic();
         state.sleeping = !state.sleeping;
         state.care.sleep += 1;
         if (state.sleeping) {
@@ -1959,11 +2126,15 @@ function cycleAction(delta) {
     }
     if (mode === "play_select") {
         playSelectIndex = (playSelectIndex + delta + 2) % 2;
+        menuTick();
+        say(GAME_HINTS[playSelectIndex]);
         render();
         return;
     }
     if (mode === "train") {
         trainIndex = (trainIndex + delta + TRICKS.length) % TRICKS.length;
+        menuTick();
+        say(TRICKS[trainIndex].desc);
         render();
         return;
     }
@@ -1973,6 +2144,7 @@ function cycleAction(delta) {
     }
     if (mode === "name") {
         letterIndex = (letterIndex + delta + LETTERS.length) % LETTERS.length;
+        menuTick();
         render();
         return;
     }
@@ -1982,11 +2154,13 @@ function cycleAction(delta) {
     }
     if (mode === "settings") {
         settingsIndex = (settingsIndex + delta + 7) % 7;
+        menuTick();
         render();
         return;
     }
     if (mode === "wipe_confirm") {
         wipeConfirmChoice = (wipeConfirmChoice + delta + 2) % 2;
+        menuTick();
         render();
         return;
     }
@@ -1995,6 +2169,8 @@ function cycleAction(delta) {
     }
 
     actionIndex = (actionIndex + delta + ACTIONS.length) % ACTIONS.length;
+    menuTick();
+    say(ACTION_HINTS[ACTIONS[actionIndex]] || ACTIONS[actionIndex]);
     render();
     if (statusEl) statusEl.textContent = ACTIONS[actionIndex];
 }
@@ -2022,7 +2198,9 @@ function onSideClick() {
         return;
     }
     if (mode === "bag") {
-        petPetting();
+        mode = "care";
+        render();
+        say("Back with " + state.name + ".");
         return;
     }
     if (mode === "name") {
@@ -2112,11 +2290,13 @@ function performRebirth() {
     state.isSick = false;
     state.neglectMarks = 0;
     state.care = { feed: 0, play: 0, train: 0, clean: 0, heal: 0, sleep: 0, walk: 0 };
+    state.stageReached = 0;
+    state.speciesRevealed = false;
     mode = "care";
     sfxWin();
     spawnParticle("✨", 0, -10);
     spawnParticle("🐣", 10, -20);
-    say(`Gen ${state.generation} egg ready! Tap FEED to hatch!`);
+    say(`Gen ${state.generation} egg ready! Press SIDE (FEED) to hatch!`);
     render();
     saveState();
 }
@@ -2164,11 +2344,13 @@ async function handleWipeConfirm() {
     state.favFood = "berry";
     state.dislikeFood = "pepper";
     state.highScores = { catch: 0, rhythm: 0 };
+    state.stageReached = 0;
+    state.speciesRevealed = false;
 
     mode = "care";
     playTone(300, 0.1, "sawtooth");
     playTone(200, 0.15, "sawtooth", 0.1);
-    say("Reset complete. Tap FEED to hatch fresh egg.");
+    say("Reset complete. Press SIDE (FEED) to hatch a fresh egg.");
     render();
     saveState();
 }
@@ -2256,6 +2438,7 @@ function backspaceName() {
 }
 
 function enterSign() {
+    if (!requireHatched()) return;
     mode = "sign";
     signBuffer = [];
     render();
@@ -2361,8 +2544,14 @@ async function startMic() {
         micSource.connect(micAnalyser);
         const data = new Uint8Array(micAnalyser.frequencyBinCount);
         lastMicBoostAt = Date.now();
+        micStartedAt = Date.now();
+        micWasActive = true;
         micTimer = setInterval(() => {
             if (!micAnalyser) return;
+            if (Date.now() - micStartedAt > MIC_AUTO_STOP_MS) {
+                stopMic(true);
+                return;
+            }
             micAnalyser.getByteTimeDomainData(data);
             let sum = 0;
             for (let i = 0; i < data.length; i += 1) {
@@ -2394,11 +2583,12 @@ async function startMic() {
     }
 }
 
-function stopMic() {
+function stopMic(clearResume) {
     if (micTimer) {
         clearInterval(micTimer);
         micTimer = null;
     }
+    if (clearResume) micWasActive = false;
     if (micSource) {
         try { micSource.disconnect(); } catch (e) { }
         micSource = null;
@@ -2418,6 +2608,8 @@ function startLiveTick() {
     liveTickTimer = setInterval(() => {
         if (!document.hidden && !gameActive && !rhythmActive) {
             applyDecay();
+            const grew = checkGrowth(true);
+            if (!grew) checkNeedsAlert();
             render();
         }
     }, 15000);
@@ -2454,6 +2646,7 @@ function base64ToUtf8(b64) {
 
 function snapshot() {
     return {
+        v: SNAPSHOT_VERSION,
         name: state.name,
         species: state.species,
         trait: state.trait,
@@ -2480,7 +2673,9 @@ function snapshot() {
         neglectMarks: state.neglectMarks,
         handshake: state.handshake.slice(),
         camPref: state.camPref,
-        highScores: Object.assign({}, state.highScores)
+        highScores: Object.assign({}, state.highScores),
+        stageReached: state.stageReached || 0,
+        speciesRevealed: !!state.speciesRevealed
     };
 }
 
@@ -2532,6 +2727,10 @@ function applySnapshot(saved) {
     if (saved.highScores && typeof saved.highScores === "object") {
         state.highScores = Object.assign({ catch: 0, rhythm: 0 }, saved.highScores);
     }
+    if (typeof saved.stageReached === "number" && Number.isFinite(saved.stageReached)) {
+        state.stageReached = clamp(Math.round(saved.stageReached), 0, STAGES.length - 1);
+    }
+    if (typeof saved.speciesRevealed === "boolean") state.speciesRevealed = saved.speciesRevealed;
 }
 
 async function loadState() {
@@ -2591,6 +2790,14 @@ function onShake() {
     }
     if (mode === "game_catch" || mode === "game_rhythm") return;
 
+    if (!state.hatched) {
+        spriteAnimFrame = 1;
+        renderPixelSprite();
+        spawnParticle("✨", 0, -8);
+        chirp(520, 0.05);
+        say("The egg wobbles… FEED me to hatch!");
+        return;
+    }
     if (state.sleeping) {
         state.sleeping = false;
         state.energy = clamp(state.energy + 4, 0, 100);
@@ -2646,6 +2853,8 @@ function persistAndPause() {
     stopMic();
     stopCam();
     stopLiveTick();
+    stopSpriteLoop();
+    stopIdleLoop();
     if (gameActive) endCatchGame();
     if (rhythmActive) endRhythmGame();
 }
@@ -2784,14 +2993,15 @@ async function init() {
     }
     applyDecay();
     updateEvolutionSpecies();
+    const grew = checkGrowth(true);
     render();
-    say(state.hatched ? localLine() : "Tap FEED to hatch me.");
+    if (!grew) say(state.hatched ? localLine() : "Press the SIDE button to hatch me!");
     await saveState();
     initializeHardware();
     initializeFallback();
     startAccel();
     startLiveTick();
-    startSpriteLoop();
+    startIdleLoop();
 
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
@@ -2799,10 +3009,12 @@ async function init() {
         } else {
             applyDecay();
             updateEvolutionSpecies();
+            checkGrowth(true);
             render();
             startAccel();
             startLiveTick();
-            startSpriteLoop();
+            startIdleLoop();
+            if (micWasActive) startMic();
         }
     });
     window.addEventListener("pagehide", persistAndPause);
