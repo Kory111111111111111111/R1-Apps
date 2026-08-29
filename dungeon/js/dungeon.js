@@ -417,6 +417,91 @@
         return run.facing;
     }
 
+    function faceTile(run, tx, ty) {
+        const dx = tx - run.x;
+        const dy = ty - run.y;
+        if (dx === 0 && dy === 0) {
+            return run.facing;
+        }
+        if (Math.abs(dx) >= Math.abs(dy)) {
+            run.facing = dx > 0 ? "E" : "W";
+        } else {
+            run.facing = dy > 0 ? "S" : "N";
+        }
+        return run.facing;
+    }
+
+    function canStepOnto(room, run, x, y, destX, destY) {
+        const tile = getTile(room, x, y);
+        if (tile === "#") {
+            return false;
+        }
+        const isDest = x === destX && y === destY;
+        if (enemyAt(room, x, y)) {
+            return isDest;
+        }
+        if (tile === "$" || tile === "+" || tile === ">") {
+            return isDest;
+        }
+        return tile === "." || tile === "^";
+    }
+
+    function pathTo(run, tx, ty) {
+        const room = currentRoom(run);
+        if (!room || !Number.isFinite(tx) || !Number.isFinite(ty)) {
+            return [];
+        }
+        tx = Math.round(tx);
+        ty = Math.round(ty);
+        if (tx === run.x && ty === run.y) {
+            return "wait";
+        }
+        if (!canStepOnto(room, run, tx, ty, tx, ty)) {
+            return [];
+        }
+        const key = function (x, y) {
+            return x + "," + y;
+        };
+        const startKey = key(run.x, run.y);
+        const destKey = key(tx, ty);
+        const prev = Object.create(null);
+        prev[startKey] = null;
+        const queue = [{ x: run.x, y: run.y }];
+        let found = false;
+        while (queue.length) {
+            const cur = queue.shift();
+            if (cur.x === tx && cur.y === ty) {
+                found = true;
+                break;
+            }
+            for (let i = 0; i < FACINGS.length; i += 1) {
+                const vec = DIR[FACINGS[i]];
+                const nx = cur.x + vec.x;
+                const ny = cur.y + vec.y;
+                const k = key(nx, ny);
+                if (prev[k] !== undefined) {
+                    continue;
+                }
+                if (!canStepOnto(room, run, nx, ny, tx, ty)) {
+                    continue;
+                }
+                prev[k] = cur;
+                queue.push({ x: nx, y: ny });
+            }
+        }
+        if (!found || prev[destKey] === undefined) {
+            return [];
+        }
+        const cells = [];
+        let cursor = { x: tx, y: ty };
+        while (cursor && key(cursor.x, cursor.y) !== startKey) {
+            cells.push({ x: cursor.x, y: cursor.y });
+            cursor = prev[key(cursor.x, cursor.y)];
+        }
+        cells.reverse();
+        return cells;
+    }
+
     function ogreAlive(room) {
         if (!room || !room.enemies) {
             return false;
@@ -948,6 +1033,8 @@
     global.PocketDungeon.newSeed = newSeed;
     global.PocketDungeon.createRun = createRun;
     global.PocketDungeon.cycleFacing = cycleFacing;
+    global.PocketDungeon.faceTile = faceTile;
+    global.PocketDungeon.pathTo = pathTo;
     global.PocketDungeon.tryAct = tryAct;
     global.PocketDungeon.waitTurn = waitTurn;
     global.PocketDungeon.useItem = useItem;

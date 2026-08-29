@@ -42,6 +42,9 @@
     let pendingLlmKind = null;
     let llmTimeoutId = null;
     let lastDeathSpeakAt = 0;
+    let walkTimer = null;
+    let walkGen = 0;
+    const WALK_STEP_MS = 120;
 
     function setStatus(text) {
         if (statusEl) {
@@ -430,12 +433,13 @@
             panelMetaEl.textContent = "SIDE TO RETURN";
             hintEl.textContent = "side: title";
         } else if (mode === "play" && save.run) {
-            hintEl.textContent = PD.facingName(save.run.facing) + " · side: go · hold: pack";
+            hintEl.textContent = "tap: go · side: wait · hold: pack";
         }
         setStatus(hintEl ? hintEl.textContent : "");
     }
 
     function beginRun(classId) {
+        stopWalk();
         save.run = PD.createRun(classId);
         mode = "play";
         invIndex = 0;
@@ -444,6 +448,108 @@
         chirp(520, 0.05);
         requestRoomFlavor();
         render();
+    }
+
+    function stopWalk() {
+        walkGen += 1;
+        if (walkTimer) {
+            clearTimeout(walkTimer);
+            walkTimer = null;
+        }
+    }
+
+    function eventToTile(event) {
+        if (!canvas) {
+            return null;
+        }
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+            return null;
+        }
+        const px = event.clientX - rect.left;
+        const py = event.clientY - rect.top;
+        if (px < 0 || py < 0 || px >= rect.width || py >= rect.height) {
+            return null;
+        }
+        const x = Math.floor((px / rect.width) * PD.MAP_SIZE);
+        const y = Math.floor((py / rect.height) * PD.MAP_SIZE);
+        if (x < 0 || y < 0 || x >= PD.MAP_SIZE || y >= PD.MAP_SIZE) {
+            return null;
+        }
+        return { x: x, y: y };
+    }
+
+    function playActResult(result) {
+        const sfx = result && result.logs && result.logs.some(function (line) {
+            return line.indexOf("HIT") === 0 || line.indexOf(" DOWN") !== -1;
+        }) ? "hit" : "step";
+        applyResult(result, result && result.blocked ? null : sfx);
+        return result;
+    }
+
+    function walkSteps(steps, gen) {
+        if (gen !== walkGen || mode !== "play" || !save.run || !steps.length) {
+            return;
+        }
+        const next = steps[0];
+        PD.faceTile(save.run, next.x, next.y);
+        const result = playActResult(PD.tryAct(save.run));
+        const rest = steps.slice(1);
+        if (
+            !rest.length ||
+            !result ||
+            !result.ok ||
+            result.blocked ||
+            result.died ||
+            result.won ||
+            result.roomChanged ||
+            (result.logs && result.logs.some(function (line) {
+                return line.indexOf("HIT") === 0;
+            }))
+        ) {
+            return;
+        }
+        walkTimer = setTimeout(function () {
+            walkSteps(rest, gen);
+        }, WALK_STEP_MS);
+    }
+
+    function onCanvasClick(event) {
+        event.stopPropagation();
+        event.preventDefault();
+        if (mode !== "play") {
+            onSideClick();
+            return;
+        }
+        if (holdFired) {
+            holdFired = false;
+            lastSideClickAt = Date.now();
+            return;
+        }
+        const now = Date.now();
+        if (now - lastSideClickAt < SIDE_CLICK_DEBOUNCE_MS) {
+            return;
+        }
+        lastSideClickAt = now;
+        if (!save.run) {
+            return;
+        }
+        stopWalk();
+        const tile = eventToTile(event);
+        if (!tile) {
+            return;
+        }
+        const path = PD.pathTo(save.run, tile.x, tile.y);
+        if (path === "wait") {
+            playActResult(PD.waitTurn(save.run));
+            return;
+        }
+        if (!path || !path.length) {
+            pushLog(["BLOCKED"]);
+            render();
+            return;
+        }
+        walkSteps(path, walkGen);
     }
 
     function applyResult(result, sfx) {
@@ -459,6 +565,7 @@
             chirp(660, 0.05);
         }
         if (result.died && save.run) {
+            stopWalk();
             const runCopy = {
                 classId: save.run.classId,
                 floor: save.run.floor
@@ -473,6 +580,7 @@
             return;
         }
         if (result.won) {
+            stopWalk();
             winLine = PD.cannedWinLine();
             PD.recordWin(save);
             mode = "win";
@@ -514,6 +622,7 @@
     }
 
     function onSideClick() {
+        stopWalk();
         if (holdFired) {
             holdFired = false;
             lastSideClickAt = Date.now();
@@ -569,15 +678,12 @@
             return;
         }
         if (mode === "play" && save.run) {
-            const result = PD.tryAct(save.run);
-            const sfx = result && result.logs && result.logs.some(function (l) {
-                return l.indexOf("HIT") === 0 || l.indexOf(" DOWN") !== -1;
-            }) ? "hit" : "step";
-            applyResult(result, result && result.blocked ? null : sfx);
+            applyResult(PD.waitTurn(save.run), "step");
         }
     }
 
     function onLongPress() {
+        stopWalk();
         if (mode === "play") {
             invIndex = 0;
             mode = "inventory";
@@ -591,6 +697,7 @@
     }
 
     function onShake() {
+        stopWalk();
         const now = Date.now();
         if (now - lastShakeAt < 700) {
             return;
@@ -667,6 +774,7 @@
     }
 
     function persistAndPause() {
+        stopWalk();
         saveState();
         stopAccel();
         stopSpriteLoop();
@@ -684,6 +792,9 @@
     }
 
     function initializeFallback() {
+        if (canvas) {
+            canvas.addEventListener("click", onCanvasClick);
+        }
         if (stageEl) {
             stageEl.addEventListener("click", function (event) {
                 event.preventDefault();
