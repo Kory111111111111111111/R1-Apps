@@ -1366,7 +1366,8 @@ function renderSettings() {
         { label: "RENAME PET ✏️" },
         { label: "RE-TRAIN HANDSHAKE 🤝" },
         { label: `REBIRTH / ASCEND (GEN ${state.generation + 1}) 🐣` },
-        { label: "⚠️ WIPE ALL / RESET", danger: true }
+        { label: "⚠️ WIPE ALL / RESET", danger: true },
+        { label: "◀ BACK TO PET" }
     ];
 
     if (settingsTitleEl) settingsTitleEl.textContent = "SETTINGS";
@@ -1379,9 +1380,11 @@ function renderSettings() {
         `).join("");
     }
 
-    actionBtnEl.textContent = items[settingsIndex].label;
-    if (items[settingsIndex].danger) actionBtnEl.classList.add("is-danger");
-    hintEl.textContent = "scroll: select · side: toggle · hold: exit";
+    if (actionBtnEl) {
+        actionBtnEl.textContent = items[settingsIndex].label;
+        if (items[settingsIndex].danger) actionBtnEl.classList.add("is-danger");
+    }
+    if (hintEl) hintEl.textContent = "scroll: select · side: toggle · hold: exit";
 }
 
 function renderWipeConfirm() {
@@ -1978,7 +1981,7 @@ function cycleAction(delta) {
         return;
     }
     if (mode === "settings") {
-        settingsIndex = (settingsIndex + delta + 6) % 6;
+        settingsIndex = (settingsIndex + delta + 7) % 7;
         render();
         return;
     }
@@ -2085,6 +2088,12 @@ function handleSettingsSelect() {
         wipeConfirmChoice = 0;
         render();
         say("WARNING: Factory reset save data?");
+        return;
+    }
+    if (settingsIndex === 6) {
+        mode = "care";
+        render();
+        say("Back with " + state.name + ".");
         return;
     }
 }
@@ -2709,6 +2718,13 @@ function initializeFallback() {
     }, { passive: true });
 
     window.addEventListener("keydown", (event) => {
+        if (mode === "game_rhythm") {
+            if (event.key === " " || event.key === "Enter" || event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                event.preventDefault();
+                hitRhythmBeat();
+                return;
+            }
+        }
         if (event.key === "ArrowLeft" || event.key === "ArrowUp" || event.key === "PageUp") {
             event.preventDefault();
             cycleAction(-1);
