@@ -15,6 +15,7 @@
 
     <script src="../js/sprites.js"></script>
     <script src="../js/dungeon.js"></script>
+    <script src="../js/world.js"></script>
     <script>
         const PD = window.PocketDungeon;
         const out = document.getElementById("output");
@@ -162,7 +163,7 @@
         // Test 7: Save/Load
         test("Save / Load serialization and metadata persistence", function () {
             const save = PD.createEmptySave();
-            assert.strictEqual(save.v, 1);
+            assert.strictEqual(save.v, 2);
             assert.strictEqual(save.meta.bestFloor, 0);
             assert.deepStrictEqual(save.meta.epitaphs, []);
 
@@ -301,7 +302,7 @@
                 run: { classId: "nonexistent", floor: -5 }
             };
             const safe = PD.applySnapshot(corruptedRaw);
-            assert.strictEqual(safe.v, 1);
+            assert.strictEqual(safe.v, 2);
             assert.strictEqual(safe.meta.bestFloor, 0);
             assert.deepStrictEqual(safe.meta.epitaphs, []);
             assert.strictEqual(safe.run, null);
@@ -318,6 +319,41 @@
 
             const winLine = PD.cannedWinLine();
             assert.ok(typeof winLine === "string" && winLine.includes("LIGHT"));
+        });
+
+        test("World flags, shop, and travel locks are local authored data", function () {
+            const W = window.PocketDungeonWorld;
+            const opened = W.advanceDialogue({ dialogueId: "elder", flags: {} }, "open_cellar");
+            assert.strictEqual(opened.state.flags.ashford_cellar_open, 1);
+            assert.strictEqual(W.canTravel({ flags: {} }, "ashford", "saltmere"), false);
+            assert.strictEqual(W.canTravel({ flags: { ashford_cellar_clear: 1 } }, "ashford", "saltmere"), true);
+            const hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 20, pack: [], lastInn: "ashford" };
+            assert.ok(W.buy(hero, "potion", "ashford").ok);
+            const cellar = PD.createSiteRun(hero, "cellar", 44);
+            assert.strictEqual(cellar.rooms.length, 3);
+            assert.strictEqual(cellar.maxSiteFloor, 1);
+            const stairs = cellar.rooms.find(function (room) { return room.kind === "stairs"; });
+            stairs.enemies = [];
+            cellar.roomId = stairs.id;
+            cellar.x = 3;
+            cellar.y = 2;
+            cellar.facing = "S";
+            const cleared = PD.tryAct(cellar);
+            assert.strictEqual(cleared.siteCleared, "cellar");
+            assert.ok(!cleared.won);
+        });
+
+        test("Death is a setback that wakes at the last inn", function () {
+            const save = PD.createEmptySave();
+            save.hero = { classId: "knight", hp: 4, maxHp: 20, atk: 4, def: 2, gold: 40, pack: [], lastInn: "ashford" };
+            save.site = PD.createSiteRun(save.hero, "cellar", 2);
+            save.site.gold = 40;
+            PD.recordDeath(save, "FELL");
+            assert.strictEqual(save.site, null);
+            assert.strictEqual(save.hero.hp, 20);
+            assert.strictEqual(save.hero.gold, 20);
+            assert.strictEqual(save.location.id, "ashford");
+            assert.strictEqual(save.meta.deaths, 1);
         });
 
         // Render summary

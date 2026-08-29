@@ -1,5 +1,6 @@
 (function () {
     const PD = window.PocketDungeon;
+    const WORLD = window.PocketDungeonWorld;
     const STORAGE_KEY = "dungeonState";
     const SIDE_CLICK_DEBOUNCE_MS = 120;
     const LLM_TIMEOUT_MS = 20000;
@@ -22,6 +23,13 @@
 
     let save = PD.createEmptySave();
     let mode = "title";
+    let townIndex = 0;
+    let townMenu = [];
+    let talkPhase = "npcs";
+    let talkNpc = null;
+    let shopNote = "";
+    let packReturn = "play";
+    let journalFrom = "town";
     let titleIndex = 0;
     let classIndex = 0;
     let invIndex = 0;
@@ -37,6 +45,7 @@
     let logLines = [];
     let deathLine = "";
     let winLine = "";
+    let clearLine = "";
     let audioCtx = null;
     let pendingLlmResolve = null;
     let pendingLlmReject = null;
@@ -489,6 +498,29 @@
         });
     }
 
+    function requestTalkFlavor(npcId, node) {
+        if (!node || !node.ifAll || !hasPluginHandler()) {
+            return;
+        }
+        const canned = (node.lines && node.lines[0]) || "";
+        pendingLlmKind = "talk";
+        sendLlmRequest([
+            "Flavor one extra spoken line for a tiny pixel RPG on a rabbit R1.",
+            "NPC: " + npcId + ". Quest already resolved. Tone: " + canned,
+            "Reply ONLY with valid JSON: {\"line\":\"...\"}",
+            "The line must be <= 80 characters, terse dark fantasy, no markdown."
+        ].join(" "), false, false).then(function (parsed) {
+            if (pendingLlmKind !== "talk" || mode !== "talk" || !parsed || !parsed.line) {
+                return;
+            }
+            if (panelMetaEl) {
+                panelMetaEl.textContent = parsed.line.slice(0, 80);
+            }
+        }).catch(function (error) {
+            console.warn("talk flavor llm failed", error);
+        });
+    }
+
     function pushLog(entries) {
         for (let i = 0; i < entries.length; i += 1) {
             const line = entries[i];
@@ -502,15 +534,41 @@
 
     function titleOptions() {
         const opts = [];
-        if (save.run) {
-            opts.push("CONTINUE", "NEW RUN");
+        if (save.hero) {
+            opts.push("CONTINUE", "NEW SAVE");
         } else {
             opts.push("START");
         }
-        if (save.meta.epitaphs && save.meta.epitaphs.length > 0) {
-            opts.push("GRAVEYARD");
+        if ((save.meta.journal && save.meta.journal.length) || (save.meta.epitaphs && save.meta.epitaphs.length)) {
+            opts.push("JOURNAL");
         }
         return opts;
+    }
+
+    function refreshTownMenu() {
+        townMenu = WORLD.townMenu(save);
+        if (!townMenu.length) {
+            townIndex = 0;
+            return;
+        }
+        townIndex = ((townIndex % townMenu.length) + townMenu.length) % townMenu.length;
+    }
+
+    function currentActor() {
+        return save.run || save.hero;
+    }
+
+    function openInventory(fromMode) {
+        packReturn = fromMode || (save.run ? "play" : "town");
+        invIndex = 0;
+        mode = "inventory";
+        render();
+    }
+
+    function closeInventory() {
+        mode = packReturn || (save.run ? "play" : "town");
+        packReturn = save.run ? "play" : "town";
+        render();
     }
 
     function drawMap() {
@@ -565,17 +623,85 @@
             panelBodyEl.textContent = opts.map(function (opt, i) {
                 return (i === titleIndex ? "> " : "  ") + opt;
             }).join("\n");
-            panelMetaEl.textContent = save.meta.bestFloor
-                ? "BEST FL" + save.meta.bestFloor
-                : "PERMADEATH";
+            panelMetaEl.textContent = "THREE TOWNS · A BROKEN ROAD";
             hintEl.textContent = "scroll: choose · side: select";
         } else if (mode === "class") {
             const id = PD.CLASS_ORDER[classIndex];
             const cls = PD.CLASSES[id];
             panelTitleEl.textContent = cls.name;
             panelBodyEl.textContent = "HP " + cls.hp + "  ATK " + cls.atk + "  DEF " + cls.def + "\n" + (cls.desc || "");
-            panelMetaEl.textContent = "SIDE TO DESCEND";
+            panelMetaEl.textContent = "SIDE TO BEGIN";
             hintEl.textContent = "scroll: class · side: go";
+        } else if (mode === "town") {
+            refreshTownMenu();
+            const town = WORLD.towns[save.location.id] || WORLD.towns.ashford;
+            panelTitleEl.textContent = town.name;
+            panelBodyEl.textContent = townMenu.map(function (option, i) {
+                return (i === townIndex ? "> " : "  ") + option.label;
+            }).join("\n");
+            panelMetaEl.textContent = shopNote || ("HP " + save.hero.hp + "/" + save.hero.maxHp + "  G" + save.hero.gold);
+            hintEl.textContent = "scroll: choose · side: select · hold: pack";
+        } else if (mode === "travel") {
+            const from = save.location.id;
+            panelTitleEl.textContent = "ROAD";
+            panelBodyEl.textContent = WORLD.TRAVEL_ORDER.map(function (id, i) {
+                return (i === townIndex ? "> " : "  ") + WORLD.travelLabel(save, from, id);
+            }).join("\n");
+            panelMetaEl.textContent = "SIDE TO TRAVEL · HOLD TO RETURN";
+            hintEl.textContent = "scroll: destination · side: travel";
+        } else if (mode === "shop") {
+            const stock = WORLD.shops[save.location.id] || [];
+            panelTitleEl.textContent = "SHOP";
+            if (!stock.length) {
+                panelBodyEl.textContent = "CLOSED";
+            } else {
+                panelBodyEl.textContent = stock.map(function (item, i) {
+                    return (i === townIndex ? "> " : "  ") + item.name + " G" + item.price;
+                }).join("\n");
+            }
+            panelMetaEl.textContent = shopNote || ("G" + save.hero.gold + " · SIDE TO BUY · HOLD TO RETURN");
+            hintEl.textContent = "scroll: item · side: buy";
+        } else if (mode === "journal") {
+            panelTitleEl.textContent = "JOURNAL";
+            panelBodyEl.textContent = (save.meta.journal || []).slice(0, 4).join("\n") || "NO ENTRIES YET.";
+            panelMetaEl.textContent = "SIDE TO RETURN";
+            hintEl.textContent = "side: back";
+        } else if (mode === "talk") {
+            if (talkPhase === "npcs") {
+                const npcs = (WORLD.towns[save.location.id] || WORLD.towns.ashford).npcs;
+                panelTitleEl.textContent = "TALK";
+                panelBodyEl.textContent = npcs.map(function (id, i) {
+                    return (i === townIndex ? "> " : "  ") + WORLD.npcName(id);
+                }).join("\n");
+                panelMetaEl.textContent = "SIDE TO SPEAK · HOLD TO RETURN";
+                hintEl.textContent = "scroll: person · side: talk";
+            } else {
+                const node = WORLD.getDialogue(talkNpc, save.flags);
+                panelTitleEl.textContent = WORLD.npcName(talkNpc);
+                const lines = (node && node.lines) || ["..."];
+                const choices = (node && node.choices) || [{ id: "leave", label: "LEAVE" }];
+                panelBodyEl.textContent = lines.join("\n") + "\n" + choices.map(function (choice, i) {
+                    return (i === townIndex ? "> " : "  ") + choice.label;
+                }).join("\n");
+                panelMetaEl.textContent = "SIDE TO CHOOSE · HOLD TO RETURN";
+                hintEl.textContent = "scroll: choice · side: confirm";
+            }
+        } else if (mode === "wake") {
+            const inn = WORLD.towns[save.hero && save.hero.lastInn] || WORLD.towns.ashford;
+            panelTitleEl.textContent = "YOU WAKE";
+            panelBodyEl.textContent = (deathLine || "THE DUNGEON SPITS YOU OUT.") + "\n" + inn.name + " INN.";
+            panelMetaEl.textContent = "GOLD HALVED · SIDE TO RISE";
+            hintEl.textContent = "side: town";
+        } else if (mode === "clear") {
+            panelTitleEl.textContent = "SITE CLEAR";
+            panelBodyEl.textContent = clearLine || "THE ROAD CHANGES.";
+            panelMetaEl.textContent = "SIDE TO RETURN";
+            hintEl.textContent = "side: town";
+        } else if (mode === "finale") {
+            panelTitleEl.textContent = "THE ROAD OPENS";
+            panelBodyEl.textContent = winLine || WORLD.endings.hold;
+            panelMetaEl.textContent = "SIDE TO KEEPGATE";
+            hintEl.textContent = "side: town";
         } else if (mode === "graveyard") {
             const count = save.meta.epitaphs.length;
             if (!count) {
@@ -591,12 +717,14 @@
             panelMetaEl.textContent = "SIDE TO RETURN";
             hintEl.textContent = "scroll: hero · side: back";
         } else if (mode === "inventory") {
-            panelTitleEl.textContent = "PACK " + (save.run ? save.run.pack.length : 0) + "/" + PD.PACK_MAX + (save.run ? " · HP " + save.run.hp + "/" + save.run.maxHp : "");
-            if (!save.run || !save.run.pack.length) {
+            const actor = currentActor();
+            const pack = actor && actor.pack ? actor.pack : [];
+            panelTitleEl.textContent = "PACK " + pack.length + "/" + PD.PACK_MAX + (actor ? " · HP " + actor.hp + "/" + actor.maxHp : "");
+            if (!pack.length) {
                 panelBodyEl.textContent = "EMPTY";
                 panelMetaEl.textContent = "SIDE TO CLOSE";
             } else {
-                panelBodyEl.textContent = save.run.pack.map(function (id, i) {
+                panelBodyEl.textContent = pack.map(function (id, i) {
                     const info = (PD.ITEM_INFO && PD.ITEM_INFO[id]) || { name: id.toUpperCase(), effect: "" };
                     const suffix = info.effect ? " (" + info.effect + ")" : "";
                     return (i === invIndex ? "> " : "  ") + info.name + suffix;
@@ -605,27 +733,33 @@
             }
             hintEl.textContent = "scroll: slot · side: use · hold: close";
         } else if (mode === "dead") {
-            panelTitleEl.textContent = "YOU DIED";
-            panelBodyEl.textContent = deathLine || "THE DUNGEON KEEPS THEM.";
-            panelMetaEl.textContent = "SIDE TO RETURN";
-            hintEl.textContent = "side: title";
+            panelTitleEl.textContent = "YOU WAKE";
+            panelBodyEl.textContent = deathLine || "THE DUNGEON SPITS YOU OUT.";
+            panelMetaEl.textContent = "SIDE TO RISE";
+            hintEl.textContent = "side: town";
         } else if (mode === "win") {
-            panelTitleEl.textContent = "YOU ESCAPE";
-            panelBodyEl.textContent = winLine || PD.cannedWinLine();
-            panelMetaEl.textContent = "SIDE TO RETURN";
-            hintEl.textContent = "side: title";
+            panelTitleEl.textContent = "THE ROAD OPENS";
+            panelBodyEl.textContent = winLine || (WORLD.endings && WORLD.endings.hold) || PD.cannedWinLine();
+            panelMetaEl.textContent = "SIDE TO KEEPGATE";
+            hintEl.textContent = "side: town";
         } else if (mode === "play" && save.run) {
             hintEl.textContent = "tap: go · side: wait · hold: pack";
         }
         setStatus(hintEl ? hintEl.textContent : "");
     }
 
-    function beginRun(classId) {
+    function enterSite(siteId) {
         stopWalk();
-        save.run = PD.createRun(classId);
+        if (save.site && save.site.siteId === siteId) {
+            save.run = save.site;
+        } else {
+            save.site = PD.createSiteRun(save.hero, siteId, null, save.flags);
+            save.run = save.site;
+        }
+        save.location = { kind: "site", id: siteId };
         mode = "play";
         invIndex = 0;
-        logLines = [];
+        logLines = [PD.cannedRoomLine(save.run)];
         saveState();
         playSfx("floor");
         requestRoomFlavor();
@@ -779,30 +913,59 @@
             };
             deathLine = PD.cannedDeathLine(save.run);
             PD.recordDeath(save, deathLine);
-            mode = "dead";
+            mode = "wake";
             playSfx("death");
             saveState();
             requestDeathFlavor(runCopy, deathLine);
             render();
             return;
         }
+        if (result.siteCleared) {
+            stopWalk();
+            const completed = WORLD.completeSite(save, result.siteCleared);
+            clearLine = (completed && completed.line) || WORLD.endings[result.siteCleared] || "THE ROAD CHANGES.";
+            if (result.siteCleared === "hold") {
+                winLine = clearLine;
+                mode = "finale";
+                playSfx("win");
+                saveState();
+                requestWinFlavor({
+                    classId: save.hero && save.hero.classId,
+                    floor: PD.MAX_FLOOR,
+                    gold: save.hero && save.hero.gold
+                }, winLine);
+            } else {
+                mode = "clear";
+                playSfx("win");
+                saveState();
+            }
+            render();
+            return;
+        }
         if (result.won && save.run) {
             stopWalk();
-            const runCopy = {
-                classId: save.run.classId,
-                floor: save.run.floor,
-                gold: save.run.gold
-            };
-            winLine = PD.cannedWinLine();
-            PD.recordWin(save);
-            mode = "win";
+            WORLD.completeSite(save, "hold");
+            winLine = WORLD.endings.hold || PD.cannedWinLine();
+            mode = "finale";
             playSfx("win");
             saveState();
-            requestWinFlavor(runCopy, winLine);
+            requestWinFlavor({
+                classId: save.hero && save.hero.classId,
+                floor: PD.MAX_FLOOR,
+                gold: save.hero && save.hero.gold
+            }, winLine);
             render();
             return;
         }
         if (result.ok) {
+            if (save.hero && save.run) {
+                save.hero.hp = save.run.hp;
+                save.hero.gold = save.run.gold;
+                save.hero.atk = save.run.atk;
+                save.hero.def = save.run.def;
+                save.hero.pack = save.run.pack.slice();
+            }
+            save.site = save.run;
             saveState();
         }
         if (result.roomChanged && save.run) {
@@ -823,21 +986,76 @@
             render();
             return;
         }
-        if (mode === "graveyard" && save.meta.epitaphs.length) {
+        if (mode === "town") {
+            refreshTownMenu();
+            shopNote = "";
+            townIndex = (townIndex + delta + townMenu.length) % townMenu.length;
+            render();
+            return;
+        }
+        if (mode === "travel") {
+            townIndex = (townIndex + delta + WORLD.TRAVEL_ORDER.length) % WORLD.TRAVEL_ORDER.length;
+            render();
+            return;
+        }
+        if (mode === "shop") {
+            const stock = WORLD.shops[save.location.id] || [];
+            if (!stock.length) {
+                return;
+            }
+            townIndex = (townIndex + delta + stock.length) % stock.length;
+            shopNote = "";
+            render();
+            return;
+        }
+        if (mode === "talk") {
+            if (talkPhase === "npcs") {
+                const npcs = (WORLD.towns[save.location.id] || WORLD.towns.ashford).npcs;
+                townIndex = (townIndex + delta + npcs.length) % npcs.length;
+            } else {
+                const node = WORLD.getDialogue(talkNpc, save.flags);
+                const choices = (node && node.choices) || [{ id: "leave", label: "LEAVE" }];
+                townIndex = (townIndex + delta + choices.length) % choices.length;
+            }
+            render();
+            return;
+        }
+        if (mode === "graveyard" && save.meta.epitaphs && save.meta.epitaphs.length) {
             const count = save.meta.epitaphs.length;
             graveIndex = (graveIndex + delta + count) % count;
             render();
             return;
         }
-        if (mode === "inventory" && save.run && save.run.pack.length) {
-            invIndex = (invIndex + delta + save.run.pack.length) % save.run.pack.length;
-            render();
+        if (mode === "inventory") {
+            const actor = currentActor();
+            if (actor && actor.pack && actor.pack.length) {
+                invIndex = (invIndex + delta + actor.pack.length) % actor.pack.length;
+                render();
+            }
             return;
         }
         if (mode === "play" && save.run) {
             PD.cycleFacing(save.run, delta);
             render();
         }
+    }
+
+    function wipeHero() {
+        save.run = null;
+        save.site = null;
+        save.hero = null;
+        save.flags = {};
+        save.location = { kind: "town", id: "ashford" };
+        saveState();
+    }
+
+    function returnToTown() {
+        mode = "town";
+        townIndex = 0;
+        shopNote = "";
+        talkNpc = null;
+        talkPhase = "npcs";
+        render();
     }
 
     function onSideClick() {
@@ -856,21 +1074,26 @@
         if (mode === "title") {
             const opts = titleOptions();
             const choice = opts[titleIndex] || opts[0];
-            if (choice === "CONTINUE" && save.run) {
-                mode = "play";
-                logLines = [PD.cannedRoomLine(save.run)];
+            if (choice === "CONTINUE" && save.hero) {
+                save.run = save.site || save.run;
+                if (save.run) {
+                    mode = "play";
+                    logLines = [PD.cannedRoomLine(save.run)];
+                } else {
+                    mode = "town";
+                    townIndex = 0;
+                }
                 render();
                 return;
             }
-            if (choice === "GRAVEYARD") {
-                mode = "graveyard";
-                graveIndex = 0;
+            if (choice === "JOURNAL") {
+                journalFrom = "title";
+                mode = "journal";
                 render();
                 return;
             }
-            if (choice === "NEW RUN") {
-                save.run = null;
-                saveState();
+            if (choice === "NEW SAVE") {
+                wipeHero();
             }
             mode = "class";
             classIndex = 0;
@@ -878,28 +1101,192 @@
             return;
         }
         if (mode === "class") {
-            beginRun(PD.CLASS_ORDER[classIndex]);
+            const classId = PD.CLASS_ORDER[classIndex];
+            const cls = PD.CLASSES[classId];
+            save.hero = {
+                classId: classId,
+                hp: cls.hp,
+                maxHp: cls.hp,
+                atk: cls.atk,
+                def: cls.def,
+                gold: classId === "scout" ? 15 : 0,
+                pack: classId === "scout" ? ["potion"] : (classId === "mage" ? ["blade"] : []),
+                lastInn: "ashford"
+            };
+            save.flags = {};
+            save.location = { kind: "town", id: "ashford" };
+            save.site = null;
+            save.run = null;
+            mode = "town";
+            townIndex = 0;
+            saveState();
+            render();
             return;
         }
-        if (mode === "graveyard" || mode === "dead" || mode === "win") {
+        if (mode === "town") {
+            refreshTownMenu();
+            const option = townMenu[townIndex];
+            if (!option) {
+                return;
+            }
+            if (option.id === "talk") {
+                talkPhase = "npcs";
+                talkNpc = null;
+                townIndex = 0;
+                mode = "talk";
+                render();
+                return;
+            }
+            if (option.id === "inn") {
+                WORLD.restAtInn(save.hero, save.location.id);
+                saveState();
+                render();
+                return;
+            }
+            if (option.id === "shop") {
+                shopNote = "";
+                townIndex = 0;
+                mode = "shop";
+                render();
+                return;
+            }
+            if (option.id === "road") {
+                townIndex = Math.max(0, WORLD.TRAVEL_ORDER.indexOf(save.location.id));
+                mode = "travel";
+                render();
+                return;
+            }
+            if (option.id === "journal") {
+                journalFrom = "town";
+                mode = "journal";
+                render();
+                return;
+            }
+            if (option.id === "pack") {
+                openInventory("town");
+                return;
+            }
+            if (option.id === "site") {
+                const unlocked = WORLD.availableSites(save, save.location.id);
+                if (!unlocked.length) {
+                    shopNote = "NO SITE OPEN";
+                    render();
+                    return;
+                }
+                enterSite(unlocked[0]);
+                return;
+            }
+            return;
+        }
+        if (mode === "travel") {
+            const destination = WORLD.TRAVEL_ORDER[townIndex];
+            if (WORLD.canTravel(save, save.location.id, destination)) {
+                save.location = { kind: "town", id: destination };
+                save.hero.lastInn = destination;
+                mode = "town";
+                townIndex = 0;
+            }
+            saveState();
+            render();
+            return;
+        }
+        if (mode === "shop") {
+            const stock = WORLD.shops[save.location.id] || [];
+            const item = stock[townIndex];
+            if (item) {
+                const bought = WORLD.buy(save.hero, item.id, save.location.id);
+                shopNote = bought.ok ? ("BOUGHT " + item.name) : (bought.reason || "NO SALE");
+            }
+            saveState();
+            render();
+            return;
+        }
+        if (mode === "journal") {
+            mode = journalFrom === "title" ? "title" : "town";
+            render();
+            return;
+        }
+        if (mode === "talk") {
+            const town = WORLD.towns[save.location.id] || WORLD.towns.ashford;
+            if (talkPhase === "npcs") {
+                talkNpc = town.npcs[townIndex] || town.npcs[0];
+                talkPhase = "node";
+                townIndex = 0;
+                const node = WORLD.getDialogue(talkNpc, save.flags);
+                if (node && node.ifAll) {
+                    requestTalkFlavor(talkNpc, node);
+                }
+                render();
+                return;
+            }
+            const node = WORLD.getDialogue(talkNpc, save.flags);
+            const choice = node && node.choices && node.choices[townIndex];
+            if (!choice) {
+                returnToTown();
+                return;
+            }
+            const result = WORLD.advanceDialogue({
+                dialogueId: talkNpc,
+                flags: save.flags,
+                hero: save.hero,
+                meta: save.meta
+            }, choice.id);
+            if (result.ok) {
+                save.flags = result.state.flags;
+                save.hero = result.state.hero || save.hero;
+                save.meta = result.state.meta || save.meta;
+            }
+            mode = "town";
+            townIndex = 0;
+            saveState();
+            render();
+            return;
+        }
+        if (mode === "wake" || mode === "clear" || mode === "finale" || mode === "dead" || mode === "win") {
+            returnToTown();
+            return;
+        }
+        if (mode === "graveyard") {
             mode = "title";
             titleIndex = 0;
             render();
             return;
         }
         if (mode === "inventory") {
-            if (!save.run || !save.run.pack.length) {
-                mode = "play";
-                render();
+            const actor = currentActor();
+            if (!actor || !actor.pack.length) {
+                closeInventory();
                 return;
             }
-            const result = PD.useItem(save.run, invIndex);
-            if (save.run.pack.length) {
-                invIndex = Math.min(invIndex, save.run.pack.length - 1);
-            } else {
-                mode = "play";
+            if (save.run) {
+                const result = PD.useItem(save.run, invIndex);
+                if (save.run.pack.length) {
+                    invIndex = Math.min(invIndex, save.run.pack.length - 1);
+                } else {
+                    closeInventory();
+                    applyResult(result, "buff");
+                    return;
+                }
+                applyResult(result, "buff");
+                return;
             }
-            applyResult(result, "buff");
+            const result = PD.useItemOnHero(save.hero, invIndex);
+            pushLog(result.logs || []);
+            if (result.ok) {
+                if (result.logs && result.logs[0] === "USED POTION") {
+                    playSfx("heal");
+                } else {
+                    playSfx("buff");
+                }
+                saveState();
+            }
+            if (save.hero.pack.length) {
+                invIndex = Math.min(invIndex, save.hero.pack.length - 1);
+            } else {
+                closeInventory();
+                return;
+            }
+            render();
             return;
         }
         if (mode === "play" && save.run) {
@@ -910,13 +1297,23 @@
     function onLongPress() {
         stopWalk();
         if (mode === "play") {
-            invIndex = 0;
-            mode = "inventory";
-            render();
+            openInventory("play");
             return;
         }
         if (mode === "inventory") {
-            mode = "play";
+            closeInventory();
+            return;
+        }
+        if (mode === "town") {
+            openInventory("town");
+            return;
+        }
+        if (mode === "talk" || mode === "shop" || mode === "travel") {
+            returnToTown();
+            return;
+        }
+        if (mode === "journal") {
+            mode = journalFrom === "title" ? "title" : "town";
             render();
         }
     }
@@ -1068,7 +1465,7 @@
                         save.run.facing = "N";
                         render();
                     }
-                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
+                } else if (mode !== "play") {
                     onScroll(-1);
                 }
                 event.preventDefault();
@@ -1080,7 +1477,7 @@
                         save.run.facing = "S";
                         render();
                     }
-                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
+                } else if (mode !== "play") {
                     onScroll(1);
                 }
                 event.preventDefault();
@@ -1092,7 +1489,7 @@
                         save.run.facing = "W";
                         render();
                     }
-                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
+                } else if (mode !== "play") {
                     onScroll(-1);
                 }
                 event.preventDefault();
@@ -1104,7 +1501,7 @@
                         save.run.facing = "E";
                         render();
                     }
-                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
+                } else if (mode !== "play") {
                     onScroll(1);
                 }
                 event.preventDefault();

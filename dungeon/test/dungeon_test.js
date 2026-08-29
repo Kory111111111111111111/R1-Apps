@@ -20,6 +20,10 @@ const dungeonCode = fs.readFileSync(path.join(__dirname, "../js/dungeon.js"), "u
 eval(dungeonCode);
 const PD = windowMock.PocketDungeon;
 
+const worldCode = fs.readFileSync(path.join(__dirname, "../js/world.js"), "utf8");
+eval(worldCode);
+const WORLD = windowMock.PocketDungeonWorld;
+
 console.log("=== POCKET DUNGEON TEST SUITE ===");
 
 let passed = 0;
@@ -168,22 +172,28 @@ test("Items: Potion, Blade, Mail usage and clamping", function () {
 // 6. Save/Load, Snapshots, and Migrations
 test("Save / Load serialization and metadata persistence", function () {
     const save = PD.createEmptySave();
-    assert.strictEqual(save.v, 1);
+    assert.strictEqual(save.v, 2);
     assert.strictEqual(save.meta.bestFloor, 0);
     assert.deepStrictEqual(save.meta.epitaphs, []);
 
-    save.run = PD.createRun("scout", 999);
-    save.run.floor = 4;
-    save.run.gold = 50;
+    save.hero = {
+        classId: "scout", hp: 16, maxHp: 16, atk: 4, def: 1,
+        gold: 50, pack: ["potion"], lastInn: "ashford"
+    };
+    save.site = PD.createRun("scout", 999);
+    save.site.floor = 4;
 
     const snap = PD.snapshot(save);
+    assert.strictEqual(snap.v, 2);
+    assert.strictEqual(snap.meta.bestFloor, 0);
     const restored = PD.applySnapshot(snap);
 
     assert.ok(restored.run);
     assert.strictEqual(restored.run.classId, "scout");
     assert.strictEqual(restored.run.floor, 4);
-    assert.strictEqual(restored.run.gold, 50);
-    assert.strictEqual(restored.run.pack.length, 1);
+    assert.strictEqual(restored.site.gold, 15);
+    assert.strictEqual(restored.hero.gold, 50);
+    assert.strictEqual(restored.hero.pack.length, 1);
 });
 
 test("Death recording and Memorial Epitaphs limit", function () {
@@ -207,6 +217,143 @@ test("Death recording and Memorial Epitaphs limit", function () {
     }
     assert.strictEqual(save.meta.epitaphs.length, 8);
     assert.strictEqual(save.meta.bestFloor, 8);
+});
+
+test("Snapshot v2 migrates a v1 mid-run and death is a setback", function () {
+    const oldRun = PD.createRun("knight", 77);
+    oldRun.floor = 3;
+    oldRun.gold = 41;
+    const migrated = PD.applySnapshot({ v: 1, run: oldRun, meta: { epitaphs: [] } });
+    assert.strictEqual(migrated.v, 2);
+    assert.strictEqual(migrated.location.kind, "site");
+    assert.strictEqual(migrated.location.id, "hold");
+    assert.ok(migrated.hero);
+    assert.strictEqual(migrated.site.floor, 3);
+
+    migrated.hero.gold = 41;
+    PD.recordDeath(migrated, "FELL");
+    assert.strictEqual(migrated.site, null);
+    assert.strictEqual(migrated.hero.hp, migrated.hero.maxHp);
+    assert.strictEqual(migrated.hero.gold, 20);
+    assert.strictEqual(migrated.meta.deaths, 1);
+    assert.strictEqual(migrated.location.id, "ashford");
+});
+
+test("World dialogue is authored and travel remains flag-gated", function () {
+    const state = WORLD.advanceDialogue({ dialogueId: "elder", flags: {} }, "open_cellar");
+    assert.strictEqual(state.ok, true);
+    assert.strictEqual(state.state.flags.ashford_cellar_open, 1);
+    assert.strictEqual(WORLD.canTravel({ flags: {} }, "ashford", "saltmere"), false);
+    assert.strictEqual(WORLD.canTravel({ flags: { ashford_cellar_clear: 1 } }, "ashford", "saltmere"), true);
+    assert.strictEqual(WORLD.canTravel({ flags: { ashford_cellar_clear: 1 } }, "ashford", "keepgate"), false);
+    assert.strictEqual(WORLD.canTravel({ flags: { saltmere_crypt_clear: 1 } }, "saltmere", "keepgate"), true);
+    assert.strictEqual(WORLD.canTravel({ flags: {} }, "ashford", "ashford"), true);
+    const hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 20, pack: [], lastInn: "ashford" };
+    const purchased = WORLD.buy(hero, "potion", "ashford");
+    assert.strictEqual(purchased.ok, true);
+    assert.strictEqual(hero.gold, 12);
+    assert.deepStrictEqual(hero.pack, ["potion"]);
+    const broke = WORLD.buy({ gold: 0, pack: [], lastInn: "ashford" }, "blade", "ashford");
+    assert.strictEqual(broke.ok, false);
+    assert.strictEqual(broke.reason, "NOT ENOUGH GOLD");
+    const siteRun = PD.createSiteRun(hero, "cellar", 44);
+    assert.strictEqual(siteRun.siteId, "cellar");
+    assert.strictEqual(siteRun.maxSiteFloor, 1);
+    assert.strictEqual(siteRun.rooms.length, 3);
+    const completed = WORLD.completeSite({
+        flags: {},
+        hero: Object.assign({}, hero),
+        site: siteRun,
+        run: siteRun,
+        meta: { journal: [] }
+    }, "cellar");
+    assert.strictEqual(completed.state.flags.ashford_cellar_clear, 1);
+    assert.strictEqual(completed.state.location.id, "ashford");
+    assert.strictEqual(completed.state.site, null);
+    assert.ok(completed.state.meta.journal[0].indexOf("mill") !== -1);
+});
+
+test("Ashford pay branch and miller aid write flags without LLM", function () {
+    const paid = WORLD.advanceDialogue({
+        dialogueId: "elder",
+        flags: {},
+        hero: { gold: 0, pack: [] },
+        meta: { journal: [] }
+    }, "ask_pay");
+    assert.strictEqual(paid.ok, true);
+    assert.strictEqual(paid.state.flags.ashford_cellar_open, 1);
+    assert.strictEqual(paid.state.hero.gold, 5);
+    const aid = WORLD.advanceDialogue({
+        dialogueId: "miller",
+        flags: {},
+        hero: { gold: 0, pack: [] },
+        meta: { journal: [] }
+    }, "aid");
+    assert.strictEqual(aid.state.flags.ashford_miller_aid, 1);
+    assert.deepStrictEqual(aid.state.hero.pack, ["potion"]);
+    const afterClear = WORLD.getDialogue("elder", { ashford_cellar_clear: 1 });
+    assert.ok(afterClear.lines.join(" ").indexOf("Saltmere") !== -1);
+    assert.strictEqual(afterClear.choices.length, 1);
+});
+
+test("Short sites use authored room counts and do not campaign-win", function () {
+    const hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 10, pack: [], lastInn: "ashford" };
+    const cellar = PD.createSiteRun(hero, "cellar", 44);
+    assert.strictEqual(cellar.rooms.length, 3);
+    const stairs = cellar.rooms.find(function (room) { return room.kind === "stairs"; });
+    assert.ok(stairs);
+    stairs.enemies = [];
+    cellar.roomId = stairs.id;
+    cellar.x = 3;
+    cellar.y = 2;
+    cellar.facing = "S";
+    const cleared = PD.tryAct(cellar);
+    assert.strictEqual(cleared.siteCleared, "cellar");
+    assert.ok(!cleared.won);
+
+    const crypt = PD.createSiteRun(hero, "crypt", 91);
+    assert.strictEqual(crypt.rooms.length, 4);
+    assert.strictEqual(crypt.namedLast, true);
+    const cryptStairs = crypt.rooms.find(function (room) { return room.kind === "stairs"; });
+    assert.ok(cryptStairs.enemies.some(function (enemy) { return enemy.type === "skeleton" && enemy.hp > 6; }));
+
+    const hold = PD.createSiteRun(hero, "hold", 7);
+    assert.strictEqual(hold.siteId, "hold");
+    assert.strictEqual(hold.maxSiteFloor, 8);
+    assert.ok(hold.rooms.length >= 5 && hold.rooms.length <= 8);
+
+    const empty = PD.createSiteRun(hero, "cellar", 44, { ashford_cellar_clear: 1 });
+    const foeCount = empty.rooms.reduce(function (sum, room) { return sum + room.enemies.length; }, 0);
+    assert.strictEqual(foeCount, 0);
+});
+
+test("Town pack items apply without an enemy turn", function () {
+    const hero = { classId: "knight", hp: 10, maxHp: 20, atk: 4, def: 2, gold: 0, pack: ["potion", "blade"] };
+    const res = PD.useItemOnHero(hero, 0);
+    assert.ok(res.ok);
+    assert.strictEqual(hero.hp, 16);
+    assert.deepStrictEqual(hero.pack, ["blade"]);
+});
+
+test("Snapshot v2 keeps journal and death still wakes at the inn", function () {
+    const save = PD.createEmptySave();
+    save.hero = { classId: "knight", hp: 4, maxHp: 20, atk: 4, def: 2, gold: 30, pack: [], lastInn: "saltmere" };
+    save.flags = { ashford_cellar_clear: 1 };
+    save.meta.journal = ["The mill wheel turns."];
+    save.site = PD.createSiteRun(save.hero, "crypt", 3);
+    save.site.gold = 30;
+    const snap = PD.snapshot(save);
+    const restored = PD.applySnapshot(snap);
+    assert.strictEqual(restored.flags.ashford_cellar_clear, 1);
+    assert.strictEqual(restored.meta.journal[0], "The mill wheel turns.");
+    assert.strictEqual(restored.site.siteId, "crypt");
+
+    PD.recordDeath(restored, "FELL IN SALT");
+    assert.strictEqual(restored.site, null);
+    assert.strictEqual(restored.hero.hp, 20);
+    assert.strictEqual(restored.hero.gold, 15);
+    assert.strictEqual(restored.location.id, "saltmere");
+    assert.strictEqual(restored.meta.deaths, 1);
 });
 
 test("Scout Trap Evasion logic in simulation", function () {

@@ -2,7 +2,7 @@
     const MAP_SIZE = 7;
     const MAX_FLOOR = 8;
     const PACK_MAX = 5;
-    const SNAPSHOT_VERSION = 1;
+    const SNAPSHOT_VERSION = 2;
     const FACINGS = ["N", "E", "S", "W"];
     const OPP = { N: "S", E: "W", S: "N", W: "E" };
     const DIR = {
@@ -266,11 +266,18 @@
         return "mail";
     }
 
-    function pickEnemyType(floor, rng) {
-        const pool = ["slime", "bat", "skeleton"].filter(function (id) {
+    function pickEnemyType(floor, rng, pool) {
+        const source = pool && pool.length ? pool.slice() : ["slime", "bat", "skeleton"];
+        const eligible = source.filter(function (id) {
+            if (!ENEMY_DEFS[id] || id === "ogre") {
+                return false;
+            }
+            if (pool && pool.length) {
+                return true;
+            }
             return ENEMY_DEFS[id].debut <= floor;
         });
-        return rng.pick(pool);
+        return rng.pick(eligible.length ? eligible : ["slime"]);
     }
 
     function populateRoom(room, floor, rng, opts) {
@@ -280,6 +287,10 @@
         if (opts.stairs) {
             setTile(room, 3, 3, ">");
             reserved.push({ x: 3, y: 3 });
+        }
+
+        if (opts.cleared) {
+            return;
         }
 
         if (opts.boss) {
@@ -308,13 +319,23 @@
             return spots.splice(idx, 1)[0];
         }
 
+        if (opts.named) {
+            const spot = takeSpot() || { x: 3, y: 2 };
+            const wight = makeEnemy("skeleton", spot.x, spot.y, floor);
+            wight.hp += 6;
+            wight.maxHp += 6;
+            wight.atk += 1;
+            room.enemies.push(wight);
+            return;
+        }
+
         const enemyCount = rng.int(0, 2);
         for (let i = 0; i < enemyCount; i += 1) {
             const spot = takeSpot();
             if (!spot) {
                 break;
             }
-            room.enemies.push(makeEnemy(pickEnemyType(floor, rng), spot.x, spot.y, floor));
+            room.enemies.push(makeEnemy(pickEnemyType(floor, rng, opts.enemyPool), spot.x, spot.y, floor));
             reserved.push(spot);
         }
 
@@ -336,9 +357,12 @@
     }
 
     function generateFloor(run, rng) {
+        const shortSite = Number(run.siteRoomCount) > 0;
         const extra = run.floor >= 7 ? 2 : 1;
-        const roomCount = clamp(5 + rng.int(0, 3), 5, 8);
-        const branchCount = Math.min(extra, roomCount - 2);
+        const roomCount = shortSite
+            ? clamp(run.siteRoomCount, 2, 8)
+            : clamp(5 + rng.int(0, 3), 5, 8);
+        const branchCount = shortSite ? 0 : Math.min(extra, roomCount - 2);
         const backbone = roomCount - branchCount;
 
         const rooms = [];
@@ -372,11 +396,15 @@
         rooms[0].kind = "start";
         rooms[backbone - 1].kind = "stairs";
 
+        const siteLimit = run.maxSiteFloor || MAX_FLOOR;
         rooms.forEach(function (room) {
             populateRoom(room, run.floor, rng, {
                 start: room.kind === "start",
                 stairs: room.kind === "stairs",
-                boss: room.kind === "stairs" && run.floor === MAX_FLOOR
+                boss: room.kind === "stairs" && run.floor === MAX_FLOOR && siteLimit === MAX_FLOOR,
+                named: room.kind === "stairs" && !!run.namedLast && run.floor === siteLimit,
+                cleared: !!run.siteClearedReplay,
+                enemyPool: run.enemyPool
             });
         });
 
@@ -385,6 +413,42 @@
         run.x = 3;
         run.y = 3;
         run.facing = "S";
+    }
+
+    function createSiteRun(hero, siteId, seed, flags) {
+        if (!hero || !CLASSES[hero.classId]) {
+            throw new Error("Unknown hero for site: " + (hero && hero.classId));
+        }
+        const world = global.PocketDungeonWorld;
+        const site = world && world.sites && world.sites[siteId];
+        const useSeed = (seed == null ? newSeed() : seed) >>> 0;
+        const rng = createRng(useSeed);
+        const run = {
+            seed: useSeed,
+            classId: hero.classId,
+            floor: 1,
+            gold: Math.max(0, hero.gold || 0),
+            hp: Math.max(0, hero.hp || 0),
+            maxHp: Math.max(1, hero.maxHp || CLASSES[hero.classId].hp),
+            atk: Math.max(0, hero.atk || 0),
+            def: Math.max(0, hero.def || 0),
+            pack: Array.isArray(hero.pack) ? hero.pack.slice() : [],
+            facing: "S",
+            x: 3,
+            y: 3,
+            roomId: 0,
+            rooms: [],
+            rngState: 0,
+            siteId: siteId || (site && site.id) || "hold",
+            maxSiteFloor: site && site.floors ? site.floors : MAX_FLOOR,
+            siteRoomCount: site && site.rooms ? site.rooms : null,
+            enemyPool: site && site.enemies ? site.enemies.slice() : null,
+            namedLast: !!(site && site.namedLast),
+            siteClearedReplay: !!(site && flags && flags[site.clear])
+        };
+        generateFloor(run, rng);
+        commitRng(run, rng);
+        return run;
     }
 
     function createRun(classId, seed) {
@@ -712,7 +776,14 @@
             return { ok: true, logs: logs, roomChanged: true, skipEnemies: true };
         }
         if (tile === ">") {
-            if (run.floor === MAX_FLOOR) {
+            const siteLimit = run.maxSiteFloor || MAX_FLOOR;
+            const isHold = !run.siteId || run.siteId === "hold";
+            if (run.floor === siteLimit && !isHold) {
+                logs.push("SITE CLEAR");
+                commitRng(run, rng);
+                return { ok: true, logs: logs, siteCleared: run.siteId, skipEnemies: true };
+            }
+            if (run.floor === siteLimit && isHold) {
                 if (ogreAlive(room)) {
                     logs.push("THE OGRE BARS THE WAY");
                     commitRng(run, rng);
@@ -720,7 +791,7 @@
                 }
                 logs.push("YOU ESCAPE");
                 commitRng(run, rng);
-                return { ok: true, logs: logs, won: true, skipEnemies: true };
+                return { ok: true, logs: logs, won: true, siteCleared: "hold", skipEnemies: true };
             }
             run.floor += 1;
             generateFloor(run, rng);
@@ -775,6 +846,30 @@
         }
         run.pack.splice(index, 1);
         return finishTurn(run, rng, logs);
+    }
+
+    function useItemOnHero(hero, index) {
+        const logs = [];
+        if (!hero || !Array.isArray(hero.pack) || index < 0 || index >= hero.pack.length) {
+            logs.push("NO ITEM");
+            return { ok: false, logs: logs };
+        }
+        const item = hero.pack[index];
+        if (item === "potion") {
+            hero.hp = clamp(hero.hp + 6, 0, hero.maxHp);
+            logs.push("USED POTION");
+        } else if (item === "blade") {
+            hero.atk += 1;
+            logs.push("USED BLADE");
+        } else if (item === "mail") {
+            hero.def += 1;
+            logs.push("USED MAIL");
+        } else {
+            logs.push("NO ITEM");
+            return { ok: false, logs: logs };
+        }
+        hero.pack.splice(index, 1);
+        return { ok: true, logs: logs };
     }
 
     function cannedRoomLine(run) {
@@ -862,7 +957,13 @@
             y: run.y,
             roomId: run.roomId,
             rooms: run.rooms,
-            rngState: run.rngState
+            rngState: run.rngState,
+            siteId: run.siteId || null,
+            maxSiteFloor: run.maxSiteFloor || null,
+            siteRoomCount: run.siteRoomCount || null,
+            enemyPool: run.enemyPool || null,
+            namedLast: !!run.namedLast,
+            siteClearedReplay: !!run.siteClearedReplay
         });
     }
 
@@ -974,16 +1075,65 @@
             y: clamp(Math.round(Number(raw.y) || 3), 0, MAP_SIZE - 1),
             roomId: roomId,
             rooms: rooms,
-            rngState: (Number(raw.rngState) || 0) >>> 0
+            rngState: (Number(raw.rngState) || 0) >>> 0,
+            siteId: typeof raw.siteId === "string" ? raw.siteId : null,
+            maxSiteFloor: Number(raw.maxSiteFloor) > 0 ? Math.min(MAX_FLOOR, Math.round(Number(raw.maxSiteFloor))) : null,
+            siteRoomCount: Number(raw.siteRoomCount) > 0 ? Math.round(Number(raw.siteRoomCount)) : null,
+            enemyPool: Array.isArray(raw.enemyPool) ? raw.enemyPool.filter(function (id) { return ENEMY_DEFS[id]; }) : null,
+            namedLast: !!raw.namedLast,
+            siteClearedReplay: !!raw.siteClearedReplay
+        };
+    }
+
+    function createHero(classId) {
+        const cls = CLASSES[classId] || CLASSES.knight;
+        return {
+            classId: cls.id,
+            hp: cls.hp,
+            maxHp: cls.hp,
+            atk: cls.atk,
+            def: cls.def,
+            gold: cls.id === "scout" ? 15 : 0,
+            pack: cls.id === "scout" ? ["potion"] : (cls.id === "mage" ? ["blade"] : []),
+            lastInn: "ashford"
         };
     }
 
     function createEmptySave() {
         return {
             v: SNAPSHOT_VERSION,
-            meta: { bestFloor: 0, epitaphs: [] },
+            hero: null,
+            flags: {},
+            location: { kind: "town", id: "ashford" },
+            site: null,
+            meta: { deaths: 0, journal: [], bestFloor: 0, epitaphs: [] },
             run: null
         };
+    }
+
+    function migrateV1(raw, save) {
+        if (raw.run) {
+            save.site = snapshotRun(raw.run);
+            save.location = { kind: "site", id: "hold" };
+            save.hero = {
+                classId: raw.run.classId,
+                hp: raw.run.hp,
+                maxHp: raw.run.maxHp,
+                atk: raw.run.atk,
+                def: raw.run.def,
+                gold: raw.run.gold,
+                pack: raw.run.pack,
+                lastInn: "ashford"
+            };
+        } else {
+            save.location = { kind: "town", id: "ashford" };
+        }
+        if (raw.meta && Array.isArray(raw.meta.epitaphs)) {
+            save.meta.journal = raw.meta.epitaphs.map(function (entry) {
+                return String(entry.line || "");
+            }).filter(Boolean);
+        }
+        save.meta.deaths = save.meta.journal.length;
     }
 
     function applySnapshot(raw) {
@@ -991,57 +1141,107 @@
         if (!raw || typeof raw !== "object") {
             return save;
         }
-        if (raw.meta && typeof raw.meta === "object") {
-            if (typeof raw.meta.bestFloor === "number" && Number.isFinite(raw.meta.bestFloor)) {
-                save.meta.bestFloor = clamp(Math.round(raw.meta.bestFloor), 0, MAX_FLOOR);
+        if (Number(raw.v || 1) < 2) {
+            migrateV1(raw, save);
+        } else {
+            if (raw.hero && typeof raw.hero === "object" && CLASSES[raw.hero.classId]) {
+                const base = createHero(raw.hero.classId);
+                save.hero = {
+                    classId: base.classId,
+                    hp: clamp(Math.round(Number(raw.hero.hp) || base.hp), 0, Math.max(1, Math.round(Number(raw.hero.maxHp) || base.maxHp))),
+                    maxHp: Math.max(1, Math.round(Number(raw.hero.maxHp) || base.maxHp)),
+                    atk: Math.max(0, Math.round(Number(raw.hero.atk) || base.atk)),
+                    def: Math.max(0, Math.round(Number(raw.hero.def) || base.def)),
+                    gold: Math.max(0, Math.round(Number(raw.hero.gold) || 0)),
+                    pack: Array.isArray(raw.hero.pack) ? raw.hero.pack.filter(function (id) { return ITEM_IDS.indexOf(id) !== -1; }).slice(0, PACK_MAX) : [],
+                    lastInn: typeof raw.hero.lastInn === "string" ? raw.hero.lastInn : "ashford"
+                };
             }
-            if (Array.isArray(raw.meta.epitaphs)) {
-                save.meta.epitaphs = raw.meta.epitaphs.filter(function (e) {
-                    return e && typeof e.line === "string";
-                }).slice(0, 8).map(function (e) {
-                    return {
-                        floor: clamp(Math.round(Number(e.floor) || 0), 0, MAX_FLOOR),
-                        classId: CLASSES[e.classId] ? e.classId : "knight",
-                        line: String(e.line).slice(0, 80)
-                    };
+            if (raw.flags && typeof raw.flags === "object") {
+                Object.keys(raw.flags).forEach(function (key) {
+                    if (raw.flags[key]) save.flags[key] = 1;
                 });
             }
+            if (raw.location && (raw.location.kind === "town" || raw.location.kind === "travel" || raw.location.kind === "site")) {
+                save.location = { kind: raw.location.kind, id: String(raw.location.id || "ashford") };
+            }
+            save.site = validateRun(raw.site);
+            if (raw.meta && typeof raw.meta === "object") {
+                save.meta.deaths = Math.max(0, Math.round(Number(raw.meta.deaths) || 0));
+                save.meta.journal = Array.isArray(raw.meta.journal) ? raw.meta.journal.filter(function (line) { return typeof line === "string"; }).slice(0, 32).map(function (line) { return line.slice(0, 120); }) : [];
+                if (typeof raw.meta.bestFloor === "number") save.meta.bestFloor = clamp(Math.round(raw.meta.bestFloor), 0, MAX_FLOOR);
+                if (Array.isArray(raw.meta.epitaphs)) save.meta.epitaphs = raw.meta.epitaphs.filter(function (entry) { return entry && typeof entry.line === "string"; }).slice(0, 8);
+            }
         }
-        save.run = validateRun(raw.run);
+        save.run = save.site;
+        if (!save.hero && save.site) {
+            save.hero = createHero(save.site.classId);
+        }
+        if (save.site && !save.location.id) save.location = { kind: "site", id: "hold" };
         return save;
     }
 
     function snapshot(save) {
         return {
             v: SNAPSHOT_VERSION,
+            hero: save.hero ? cloneJson(save.hero) : null,
+            flags: cloneJson(save.flags || {}),
+            location: cloneJson(save.location || { kind: "town", id: "ashford" }),
+            site: snapshotRun(save.site || save.run),
             meta: {
-                bestFloor: save.meta.bestFloor,
-                epitaphs: save.meta.epitaphs.slice(0, 8)
-            },
-            run: snapshotRun(save.run)
+                deaths: save.meta.deaths || 0,
+                journal: (save.meta.journal || []).slice(0, 32),
+                bestFloor: save.meta.bestFloor || 0,
+                epitaphs: (save.meta.epitaphs || []).slice(0, 8)
+            }
         };
     }
 
     function recordDeath(save, line) {
-        if (!save.run) {
-            return;
-        }
-        const floor = clamp(save.run.floor, 1, MAX_FLOOR);
-        if (floor > save.meta.bestFloor) {
-            save.meta.bestFloor = floor;
-        }
-        save.meta.epitaphs.unshift({
-            floor: floor,
-            classId: save.run.classId,
-            line: String(line || cannedDeathLine(save.run)).slice(0, 80)
-        });
+        const run = save.site || save.run;
+        if (!run) return;
+        const floor = clamp(run.floor, 1, MAX_FLOOR);
+        save.hero = save.hero || createHero(run.classId);
+        save.hero.hp = save.hero.maxHp;
+        const purse = Number(run.gold != null ? run.gold : save.hero.gold) || 0;
+        save.hero.gold = Math.floor(Math.max(0, purse) / 2);
+        save.hero.lastInn = save.hero.lastInn || "ashford";
+        save.flags = save.flags || {};
+        save.meta = save.meta || { deaths: 0, journal: [] };
+        save.meta.deaths = (save.meta.deaths || 0) + 1;
+        save.meta.journal = save.meta.journal || [];
+        save.meta.journal.unshift(String(line || cannedDeathLine(run)).slice(0, 120));
+        save.meta.journal = save.meta.journal.slice(0, 32);
+        save.meta.bestFloor = Math.max(save.meta.bestFloor || 0, floor);
+        save.meta.epitaphs = save.meta.epitaphs || [];
+        save.meta.epitaphs.unshift({ floor: floor, classId: run.classId, line: String(line || cannedDeathLine(run)).slice(0, 80) });
         save.meta.epitaphs = save.meta.epitaphs.slice(0, 8);
+        save.site = null;
         save.run = null;
+        save.location = { kind: "town", id: save.hero.lastInn };
     }
 
     function recordWin(save) {
+        save.meta = save.meta || { deaths: 0, journal: [], bestFloor: 0, epitaphs: [] };
         save.meta.bestFloor = MAX_FLOOR;
+        if (global.PocketDungeonWorld && global.PocketDungeonWorld.completeSite) {
+            global.PocketDungeonWorld.completeSite(save, "hold");
+            return;
+        }
+        const run = save.site || save.run;
+        if (run) {
+            save.hero = save.hero || createHero(run.classId);
+            save.hero.hp = run.hp;
+            save.hero.gold = run.gold;
+            save.hero.atk = run.atk;
+            save.hero.def = run.def;
+            save.hero.pack = run.pack.slice();
+            save.hero.lastInn = "keepgate";
+        }
+        save.site = null;
         save.run = null;
+        save.location = { kind: "town", id: "keepgate" };
+        save.flags = Object.assign({}, save.flags || {}, { keepgate_hold_clear: 1 });
     }
 
     global.PocketDungeon = global.PocketDungeon || {};
@@ -1052,12 +1252,14 @@
     global.PocketDungeon.MAX_FLOOR = MAX_FLOOR;
     global.PocketDungeon.newSeed = newSeed;
     global.PocketDungeon.createRun = createRun;
+    global.PocketDungeon.createSiteRun = createSiteRun;
     global.PocketDungeon.cycleFacing = cycleFacing;
     global.PocketDungeon.faceTile = faceTile;
     global.PocketDungeon.pathTo = pathTo;
     global.PocketDungeon.tryAct = tryAct;
     global.PocketDungeon.waitTurn = waitTurn;
     global.PocketDungeon.useItem = useItem;
+    global.PocketDungeon.useItemOnHero = useItemOnHero;
     global.PocketDungeon.cannedRoomLine = cannedRoomLine;
     global.PocketDungeon.cannedDeathLine = cannedDeathLine;
     global.PocketDungeon.cannedWinLine = cannedWinLine;
