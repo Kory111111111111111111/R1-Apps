@@ -1453,7 +1453,7 @@
         }
         window.addEventListener("wheel", function (event) {
             event.preventDefault();
-            onScroll(event.deltaY > 0 ? 1 : -1);
+            onScroll(event.deltaY > 0 ? -1 : 1);
         }, { passive: false });
         window.addEventListener("keydown", function (event) {
             const key = event.key;
