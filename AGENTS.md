@@ -119,4 +119,4 @@ When a request conflicts with the 240×282 Creation model or requires non-SDK na
 - Metronome — `metronome/` (`https://kory111111111111111111.github.io/R1-Apps/metronome/`)
 - Weather — `weather/` (`https://kory111111111111111111.github.io/R1-Apps/weather/`)
 - Mini Synth — `synth/` (`https://kory111111111111111111.github.io/R1-Apps/synth/`)
-- Familiar — `familiar/` (`https://kory111111111111111111.github.io/R1-Apps/familiar/`)
+- Familiar — `familiar/` (`https://kory111111111111111111.github.io/R1-Apps/familiar/`): Tamagotchi companion with 5 distinct species (`bunny|drake|ghost|mecha|neko`), 5-stage care-shaped evolution (`EGG` → `BABY` → `TEEN` → `ADULT` → `ASCENDED`), 11 activities (Feed, Play Mini-Games [Catch & Rhythm], Trick Training, Bubble Bath Clean, Clinic Heal, Forage Walk, Artifact Bag, Sleep, Handshake Sign, Pet Passport Stats, Settings & 2-Step Safe Wipe/Restart), generation lineage tracking, and Base64 storage persistence.
