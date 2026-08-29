@@ -3,19 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Pocket Dungeon - A permadeath roguelike crawler for Rabbit R1">
     <title>Pocket Dungeon</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
     <div id="app">
         <div id="stage">
-            <canvas id="mapCanvas" width="224" height="224"></canvas>
-            <header class="hud" id="hud" hidden>
+            <canvas id="mapCanvas" width="224" height="224" role="img" aria-label="Dungeon floor map"></canvas>
+            <header class="hud" id="hud" hidden aria-label="Player status">
                 <span id="hudFloor">FL1</span>
                 <span id="hudStats">HP 20  G0</span>
             </header>
             <p id="log" class="log" hidden aria-live="polite"></p>
-            <div id="panel" class="panel">
+            <div id="panel" class="panel" role="region" aria-labelledby="panelTitle">
                 <h1 id="panelTitle">POCKET DUNGEON</h1>
                 <p id="panelBody">Permadeath. One room at a time.</p>
                 <p id="panelMeta">SIDE TO START</p>

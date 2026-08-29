@@ -25,6 +25,7 @@
     let titleIndex = 0;
     let classIndex = 0;
     let invIndex = 0;
+    let graveIndex = 0;
     let animFrame = 0;
     let spriteTimer = null;
     let lastSideClickAt = 0;
@@ -50,6 +51,20 @@
         if (statusEl) {
             statusEl.textContent = text;
         }
+    }
+
+    function triggerStageFx(fxClass) {
+        if (!stageEl || REDUCED_MOTION) {
+            return;
+        }
+        stageEl.classList.remove("hit-flash", "heal-flash", "screen-shake");
+        void stageEl.offsetWidth;
+        stageEl.classList.add(fxClass);
+        setTimeout(function () {
+            if (stageEl) {
+                stageEl.classList.remove(fxClass);
+            }
+        }, 260);
     }
 
     function utf8ToBase64(str) {
@@ -135,6 +150,121 @@
             audioCtx = null;
         }
         return audioCtx;
+    }
+
+    function playSfx(type) {
+        const ctxAudio = ensureAudio();
+        if (!ctxAudio) {
+            return;
+        }
+        try {
+            const t0 = ctxAudio.currentTime;
+            const osc = ctxAudio.createOscillator();
+            const gain = ctxAudio.createGain();
+            osc.connect(gain);
+            gain.connect(ctxAudio.destination);
+
+            if (type === "step") {
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(320, t0);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.04, t0 + 0.005);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
+                osc.start(t0);
+                osc.stop(t0 + 0.035);
+            } else if (type === "hit") {
+                osc.type = "sawtooth";
+                osc.frequency.setValueAtTime(220, t0);
+                osc.frequency.exponentialRampToValueAtTime(70, t0 + 0.08);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.08, t0 + 0.01);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+                osc.start(t0);
+                osc.stop(t0 + 0.09);
+            } else if (type === "damage") {
+                osc.type = "triangle";
+                osc.frequency.setValueAtTime(130, t0);
+                osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.12);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.12, t0 + 0.01);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+                osc.start(t0);
+                osc.stop(t0 + 0.13);
+            } else if (type === "trap") {
+                osc.type = "sawtooth";
+                osc.frequency.setValueAtTime(280, t0);
+                osc.frequency.linearRampToValueAtTime(140, t0 + 0.1);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.09, t0 + 0.01);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+                osc.start(t0);
+                osc.stop(t0 + 0.11);
+            } else if (type === "chest") {
+                osc.type = "square";
+                osc.frequency.setValueAtTime(523.25, t0);
+                osc.frequency.setValueAtTime(659.25, t0 + 0.04);
+                osc.frequency.setValueAtTime(783.99, t0 + 0.08);
+                osc.frequency.setValueAtTime(1046.50, t0 + 0.12);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.06, t0 + 0.01);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+                osc.start(t0);
+                osc.stop(t0 + 0.23);
+            } else if (type === "heal") {
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(440, t0);
+                osc.frequency.exponentialRampToValueAtTime(880, t0 + 0.15);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.08, t0 + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+                osc.start(t0);
+                osc.stop(t0 + 0.19);
+            } else if (type === "buff") {
+                osc.type = "triangle";
+                osc.frequency.setValueAtTime(350, t0);
+                osc.frequency.exponentialRampToValueAtTime(700, t0 + 0.14);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.07, t0 + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+                osc.start(t0);
+                osc.stop(t0 + 0.17);
+            } else if (type === "floor") {
+                osc.type = "triangle";
+                osc.frequency.setValueAtTime(260, t0);
+                osc.frequency.exponentialRampToValueAtTime(110, t0 + 0.25);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.09, t0 + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+                osc.start(t0);
+                osc.stop(t0 + 0.3);
+            } else if (type === "win") {
+                osc.type = "square";
+                osc.frequency.setValueAtTime(523.25, t0);
+                osc.frequency.setValueAtTime(659.25, t0 + 0.08);
+                osc.frequency.setValueAtTime(783.99, t0 + 0.16);
+                osc.frequency.setValueAtTime(1046.50, t0 + 0.24);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.08, t0 + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+                osc.start(t0);
+                osc.stop(t0 + 0.48);
+            } else if (type === "death") {
+                osc.type = "sawtooth";
+                osc.frequency.setValueAtTime(220, t0);
+                osc.frequency.setValueAtTime(185, t0 + 0.1);
+                osc.frequency.setValueAtTime(147, t0 + 0.2);
+                osc.frequency.setValueAtTime(110, t0 + 0.3);
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.linearRampToValueAtTime(0.09, t0 + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+                osc.start(t0);
+                osc.stop(t0 + 0.48);
+            } else {
+                chirp(420, 0.03);
+            }
+        } catch (error) {
+            console.warn("playSfx failed", error);
+        }
     }
 
     function chirp(freq, duration) {
@@ -287,6 +417,16 @@
         ].join(" ");
     }
 
+    function winPrompt(run, canned) {
+        return [
+            "Write a triumphant one-line victory chronicle for a rabbit R1 dungeon crawl.",
+            "Class " + run.classId + ", defeated the Floor " + PD.MAX_FLOOR + " Ogre and escaped alive with " + run.gold + " gold.",
+            "Fallback tone: " + canned,
+            "Reply ONLY with valid JSON: {\"line\":\"...\"}",
+            "The line must be <= 80 characters, glorious fantasy, no markdown."
+        ].join(" ");
+    }
+
     function requestRoomFlavor() {
         if (!save.run || mode !== "play") {
             return;
@@ -331,6 +471,24 @@
         });
     }
 
+    function requestWinFlavor(runSnapshot, canned) {
+        pendingLlmKind = "win";
+        const now = Date.now();
+        if (now - lastDeathSpeakAt < SPEAK_COOLDOWN_MS) {
+            return;
+        }
+        lastDeathSpeakAt = now;
+        sendLlmRequest(winPrompt(runSnapshot, canned), true, true).then(function (parsed) {
+            if (!parsed || !parsed.line) {
+                return;
+            }
+            winLine = parsed.line;
+            render();
+        }).catch(function (error) {
+            console.warn("win flavor llm failed", error);
+        });
+    }
+
     function pushLog(entries) {
         for (let i = 0; i < entries.length; i += 1) {
             const line = entries[i];
@@ -343,10 +501,16 @@
     }
 
     function titleOptions() {
+        const opts = [];
         if (save.run) {
-            return ["CONTINUE", "NEW RUN"];
+            opts.push("CONTINUE", "NEW RUN");
+        } else {
+            opts.push("START");
         }
-        return ["START"];
+        if (save.meta.epitaphs && save.meta.epitaphs.length > 0) {
+            opts.push("GRAVEYARD");
+        }
+        return opts;
     }
 
     function drawMap() {
@@ -385,6 +549,8 @@
         if (save.run && hudFloorEl && hudStatsEl) {
             hudFloorEl.textContent = "FL" + save.run.floor;
             hudStatsEl.textContent = "HP " + save.run.hp + "/" + save.run.maxHp + "  G" + save.run.gold;
+            const isLowHp = save.run.hp <= Math.ceil(save.run.maxHp * 0.25);
+            hudStatsEl.classList.toggle("hp-critical", isLowHp);
         }
 
         const showPanel = mode !== "play";
@@ -402,22 +568,38 @@
             panelMetaEl.textContent = save.meta.bestFloor
                 ? "BEST FL" + save.meta.bestFloor
                 : "PERMADEATH";
-            hintEl.textContent = save.run ? "scroll: choose · side: go" : "side: start · scroll: class later";
+            hintEl.textContent = "scroll: choose · side: select";
         } else if (mode === "class") {
             const id = PD.CLASS_ORDER[classIndex];
             const cls = PD.CLASSES[id];
             panelTitleEl.textContent = cls.name;
-            panelBodyEl.textContent = "HP " + cls.hp + "  ATK " + cls.atk + "  DEF " + cls.def;
+            panelBodyEl.textContent = "HP " + cls.hp + "  ATK " + cls.atk + "  DEF " + cls.def + "\n" + (cls.desc || "");
             panelMetaEl.textContent = "SIDE TO DESCEND";
             hintEl.textContent = "scroll: class · side: go";
+        } else if (mode === "graveyard") {
+            const count = save.meta.epitaphs.length;
+            if (!count) {
+                mode = "title";
+                render();
+                return;
+            }
+            graveIndex = ((graveIndex % count) + count) % count;
+            const entry = save.meta.epitaphs[graveIndex];
+            const clsName = PD.CLASSES[entry.classId] ? PD.CLASSES[entry.classId].name : String(entry.classId).toUpperCase();
+            panelTitleEl.textContent = "FALLEN (" + (graveIndex + 1) + "/" + count + ")";
+            panelBodyEl.textContent = "FL" + entry.floor + " " + clsName + "\n\n\"" + entry.line + "\"";
+            panelMetaEl.textContent = "SIDE TO RETURN";
+            hintEl.textContent = "scroll: hero · side: back";
         } else if (mode === "inventory") {
-            panelTitleEl.textContent = "PACK " + (save.run ? save.run.pack.length : 0) + "/" + PD.PACK_MAX;
+            panelTitleEl.textContent = "PACK " + (save.run ? save.run.pack.length : 0) + "/" + PD.PACK_MAX + (save.run ? " · HP " + save.run.hp + "/" + save.run.maxHp : "");
             if (!save.run || !save.run.pack.length) {
                 panelBodyEl.textContent = "EMPTY";
                 panelMetaEl.textContent = "SIDE TO CLOSE";
             } else {
                 panelBodyEl.textContent = save.run.pack.map(function (id, i) {
-                    return (i === invIndex ? "> " : "  ") + id.toUpperCase();
+                    const info = (PD.ITEM_INFO && PD.ITEM_INFO[id]) || { name: id.toUpperCase(), effect: "" };
+                    const suffix = info.effect ? " (" + info.effect + ")" : "";
+                    return (i === invIndex ? "> " : "  ") + info.name + suffix;
                 }).join("\n");
                 panelMetaEl.textContent = "SIDE: USE · HOLD: CLOSE";
             }
@@ -445,7 +627,7 @@
         invIndex = 0;
         logLines = [];
         saveState();
-        chirp(520, 0.05);
+        playSfx("floor");
         requestRoomFlavor();
         render();
     }
@@ -480,10 +662,7 @@
     }
 
     function playActResult(result) {
-        const sfx = result && result.logs && result.logs.some(function (line) {
-            return line.indexOf("HIT") === 0 || line.indexOf(" DOWN") !== -1;
-        }) ? "hit" : "step";
-        applyResult(result, result && result.blocked ? null : sfx);
+        applyResult(result, null);
         return result;
     }
 
@@ -491,10 +670,15 @@
         if (gen !== walkGen || mode !== "play" || !save.run || !steps.length) {
             return;
         }
+        const prevHp = save.run.hp;
         const next = steps[0];
         PD.faceTile(save.run, next.x, next.y);
         const result = playActResult(PD.tryAct(save.run));
         const rest = steps.slice(1);
+        const tookDamage = save.run && save.run.hp < prevHp;
+        const hasInterruptLog = result && result.logs && result.logs.some(function (line) {
+            return line.indexOf("HIT") !== -1 || line.indexOf("TRAP") !== -1 || line.indexOf("DOWN") !== -1;
+        });
         if (
             !rest.length ||
             !result ||
@@ -503,9 +687,9 @@
             result.died ||
             result.won ||
             result.roomChanged ||
-            (result.logs && result.logs.some(function (line) {
-                return line.indexOf("HIT") === 0;
-            }))
+            result.floorChanged ||
+            tookDamage ||
+            hasInterruptLog
         ) {
             return;
         }
@@ -541,7 +725,7 @@
         }
         const path = PD.pathTo(save.run, tile.x, tile.y);
         if (path === "wait") {
-            playActResult(PD.waitTurn(save.run));
+            applyResult(PD.waitTurn(save.run), "step");
             return;
         }
         if (!path || !path.length) {
@@ -552,18 +736,41 @@
         walkSteps(path, walkGen);
     }
 
-    function applyResult(result, sfx) {
+    function applyResult(result, fallbackSfx) {
         if (!result) {
             return;
         }
+        const prevHp = save.run ? save.run.hp : 0;
         pushLog(result.logs || []);
-        if (sfx === "hit") {
-            chirp(180, 0.07);
-        } else if (sfx === "step") {
-            chirp(420, 0.03);
-        } else if (sfx === "item") {
-            chirp(660, 0.05);
+
+        const logs = result.logs || [];
+        const tookDamage = save.run && save.run.hp < prevHp;
+        const healed = save.run && save.run.hp > prevHp;
+        const hitEnemy = logs.some(function (l) { return l.indexOf("HIT") === 0; });
+        const hitTrap = logs.some(function (l) { return l.indexOf("TRAP") === 0; });
+        const gotChest = logs.some(function (l) { return l.indexOf("OPEN") === 0; });
+        const usedItem = logs.some(function (l) { return l.indexOf("USED") === 0; });
+
+        if (tookDamage) {
+            triggerStageFx("hit-flash");
+            playSfx(hitTrap ? "trap" : "damage");
+        } else if (healed) {
+            triggerStageFx("heal-flash");
+            playSfx("heal");
+        } else if (gotChest) {
+            playSfx("chest");
+        } else if (usedItem) {
+            playSfx("buff");
+        } else if (hitEnemy) {
+            playSfx("hit");
+        } else if (result.floorChanged || result.roomChanged) {
+            playSfx("floor");
+        } else if (fallbackSfx) {
+            playSfx(fallbackSfx);
+        } else if (result.ok && !result.blocked) {
+            playSfx("step");
         }
+
         if (result.died && save.run) {
             stopWalk();
             const runCopy = {
@@ -573,19 +780,25 @@
             deathLine = PD.cannedDeathLine(save.run);
             PD.recordDeath(save, deathLine);
             mode = "dead";
-            chirp(110, 0.18);
+            playSfx("death");
             saveState();
             requestDeathFlavor(runCopy, deathLine);
             render();
             return;
         }
-        if (result.won) {
+        if (result.won && save.run) {
             stopWalk();
+            const runCopy = {
+                classId: save.run.classId,
+                floor: save.run.floor,
+                gold: save.run.gold
+            };
             winLine = PD.cannedWinLine();
             PD.recordWin(save);
             mode = "win";
-            chirp(784, 0.12);
+            playSfx("win");
             saveState();
+            requestWinFlavor(runCopy, winLine);
             render();
             return;
         }
@@ -607,6 +820,12 @@
         }
         if (mode === "class") {
             classIndex = (classIndex + delta + PD.CLASS_ORDER.length) % PD.CLASS_ORDER.length;
+            render();
+            return;
+        }
+        if (mode === "graveyard" && save.meta.epitaphs.length) {
+            const count = save.meta.epitaphs.length;
+            graveIndex = (graveIndex + delta + count) % count;
             render();
             return;
         }
@@ -643,6 +862,12 @@
                 render();
                 return;
             }
+            if (choice === "GRAVEYARD") {
+                mode = "graveyard";
+                graveIndex = 0;
+                render();
+                return;
+            }
             if (choice === "NEW RUN") {
                 save.run = null;
                 saveState();
@@ -656,7 +881,7 @@
             beginRun(PD.CLASS_ORDER[classIndex]);
             return;
         }
-        if (mode === "dead" || mode === "win") {
+        if (mode === "graveyard" || mode === "dead" || mode === "win") {
             mode = "title";
             titleIndex = 0;
             render();
@@ -674,7 +899,7 @@
             } else {
                 mode = "play";
             }
-            applyResult(result, "item");
+            applyResult(result, "buff");
             return;
         }
         if (mode === "play" && save.run) {
@@ -798,6 +1023,11 @@
         if (stageEl) {
             stageEl.addEventListener("click", function (event) {
                 event.preventDefault();
+                if (holdFired) {
+                    holdFired = false;
+                    lastSideClickAt = Date.now();
+                    return;
+                }
                 onSideClick();
             });
             stageEl.addEventListener("pointerdown", function () {
@@ -832,47 +1062,67 @@
             const key = event.key;
             if (key === "ArrowUp" || key === "w" || key === "W") {
                 if (mode === "play" && save.run) {
-                    save.run.facing = "N";
-                    render();
-                } else {
+                    if (save.run.facing === "N") {
+                        playActResult(PD.tryAct(save.run));
+                    } else {
+                        save.run.facing = "N";
+                        render();
+                    }
+                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
                     onScroll(-1);
                 }
                 event.preventDefault();
             } else if (key === "ArrowDown" || key === "s" || key === "S") {
                 if (mode === "play" && save.run) {
-                    save.run.facing = "S";
-                    render();
-                } else {
+                    if (save.run.facing === "S") {
+                        playActResult(PD.tryAct(save.run));
+                    } else {
+                        save.run.facing = "S";
+                        render();
+                    }
+                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
                     onScroll(1);
                 }
                 event.preventDefault();
             } else if (key === "ArrowLeft" || key === "a" || key === "A") {
                 if (mode === "play" && save.run) {
-                    save.run.facing = "W";
-                    render();
-                } else {
+                    if (save.run.facing === "W") {
+                        playActResult(PD.tryAct(save.run));
+                    } else {
+                        save.run.facing = "W";
+                        render();
+                    }
+                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
                     onScroll(-1);
                 }
                 event.preventDefault();
             } else if (key === "ArrowRight" || key === "d" || key === "D") {
                 if (mode === "play" && save.run) {
-                    save.run.facing = "E";
-                    render();
-                } else {
+                    if (save.run.facing === "E") {
+                        playActResult(PD.tryAct(save.run));
+                    } else {
+                        save.run.facing = "E";
+                        render();
+                    }
+                } else if (mode === "graveyard" || mode === "inventory" || mode === "class" || mode === "title") {
                     onScroll(1);
                 }
                 event.preventDefault();
-            } else if (key === "Enter") {
-                onSideClick();
-                event.preventDefault();
-            } else if (key === " ") {
-                if (mode === "play") {
-                    onShake();
+            } else if (key === "Enter" || key === "f" || key === "F" || key === "e" || key === "E") {
+                if (mode === "play" && save.run) {
+                    playActResult(PD.tryAct(save.run));
                 } else {
                     onSideClick();
                 }
                 event.preventDefault();
-            } else if (key === "Escape") {
+            } else if (key === " " || key === "5") {
+                if (mode === "play" && save.run) {
+                    applyResult(PD.waitTurn(save.run), "step");
+                } else {
+                    onSideClick();
+                }
+                event.preventDefault();
+            } else if (key === "Escape" || key === "i" || key === "I" || key === "Tab") {
                 onLongPress();
                 event.preventDefault();
             }

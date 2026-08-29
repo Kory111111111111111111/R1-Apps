@@ -25,9 +25,9 @@
     };
 
     const CLASSES = {
-        knight: { id: "knight", name: "KNIGHT", hp: 20, atk: 4, def: 2 },
-        scout: { id: "scout", name: "SCOUT", hp: 16, atk: 3, def: 1 },
-        mage: { id: "mage", name: "MAGE", hp: 14, atk: 5, def: 0 }
+        knight: { id: "knight", name: "KNIGHT", hp: 20, atk: 4, def: 2, desc: "HEAVY ARMOR · TANK" },
+        scout: { id: "scout", name: "SCOUT", hp: 16, atk: 4, def: 1, desc: "AGILE · EVADES TRAPS" },
+        mage: { id: "mage", name: "MAGE", hp: 14, atk: 5, def: 0, desc: "SPELLCASTER · BLADE" }
     };
     const CLASS_ORDER = ["knight", "scout", "mage"];
 
@@ -39,6 +39,12 @@
     };
 
     const ITEM_IDS = ["potion", "blade", "mail"];
+    const ITEM_INFO = {
+        potion: { name: "POTION", effect: "+6 HP", type: "heal" },
+        blade: { name: "BLADE", effect: "+1 ATK", type: "buff" },
+        mail: { name: "MAIL", effect: "+1 DEF", type: "buff" },
+        coin: { name: "COIN", effect: "+10 GOLD", type: "gold" }
+    };
 
     let lastCryptoValue = -1;
     let cryptoRepeatStreak = 0;
@@ -388,16 +394,24 @@
         }
         const useSeed = (seed == null ? newSeed() : seed) >>> 0;
         const rng = createRng(useSeed);
+        let startingPack = [];
+        let startingGold = 0;
+        if (cls.id === "scout") {
+            startingPack = ["potion"];
+            startingGold = 15;
+        } else if (cls.id === "mage") {
+            startingPack = ["blade"];
+        }
         const run = {
             seed: useSeed,
             classId: cls.id,
             floor: 1,
-            gold: 0,
+            gold: startingGold,
             hp: cls.hp,
             maxHp: cls.hp,
             atk: cls.atk,
             def: cls.def,
-            pack: [],
+            pack: startingPack,
             facing: "S",
             x: 3,
             y: 3,
@@ -718,9 +732,14 @@
         run.x = nx;
         run.y = ny;
         if (tile === "^") {
-            run.hp = clamp(run.hp - 2, 0, run.maxHp);
+            const evaded = run.classId === "scout" && rng.int(1, 100) <= 50;
+            if (evaded) {
+                logs.push("TRAP EVADED");
+            } else {
+                run.hp = clamp(run.hp - 2, 0, run.maxHp);
+                logs.push("TRAP 2");
+            }
             setTile(room, nx, ny, ".");
-            logs.push("TRAP 2");
         }
         return finishTurn(run, rng, logs);
     }
@@ -1007,7 +1026,7 @@
         if (!save.run) {
             return;
         }
-        const floor = save.run.floor;
+        const floor = clamp(save.run.floor, 1, MAX_FLOOR);
         if (floor > save.meta.bestFloor) {
             save.meta.bestFloor = floor;
         }
@@ -1028,6 +1047,7 @@
     global.PocketDungeon = global.PocketDungeon || {};
     global.PocketDungeon.CLASSES = CLASSES;
     global.PocketDungeon.CLASS_ORDER = CLASS_ORDER;
+    global.PocketDungeon.ITEM_INFO = ITEM_INFO;
     global.PocketDungeon.PACK_MAX = PACK_MAX;
     global.PocketDungeon.MAX_FLOOR = MAX_FLOOR;
     global.PocketDungeon.newSeed = newSeed;
