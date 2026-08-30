@@ -356,6 +356,75 @@ test("Snapshot v2 keeps journal and death still wakes at the inn", function () {
     assert.strictEqual(restored.meta.deaths, 1);
 });
 
+test("Class abilities are distinct and persist through snapshots", function () {
+    const knight = PD.createRun("knight", 1);
+    const room = PD.currentRoom(knight);
+    room.enemies = [{ type: "slime", x: knight.x, y: knight.y - 1, hp: 10, maxHp: 10, atk: 2, def: 0 }];
+    knight.facing = "N";
+    const guard = PD.useAbility(knight);
+    assert.ok(guard.ok);
+    assert.strictEqual(knight.guardTurns, 1);
+    const save = PD.createEmptySave();
+    save.site = knight;
+    const restoredBeforeHit = PD.applySnapshot(PD.snapshot(save));
+    assert.strictEqual(restoredBeforeHit.site.guardTurns, 1);
+    const hit = PD.tryAct(knight);
+    assert.ok(hit.logs.includes("GUARD BREAKS"));
+
+    const scout = PD.createRun("scout", 2);
+    const scoutRoom = PD.currentRoom(scout);
+    scout.facing = "S";
+    scoutRoom.tiles[scout.y + 1] = scoutRoom.tiles[scout.y + 1].slice(0, scout.x) + "^" + scoutRoom.tiles[scout.y + 1].slice(scout.x + 1);
+    const disarm = PD.useAbility(scout);
+    assert.ok(disarm.ok);
+    assert.ok(disarm.logs.includes("TRAP DISARMED"));
+    assert.strictEqual(scoutRoom.tiles[scout.y + 1][scout.x], ".");
+
+    const mage = PD.createRun("mage", 3);
+    const mageRoom = PD.currentRoom(mage);
+    mage.facing = "N";
+    mageRoom.enemies = [{ type: "slime", x: mage.x, y: mage.y - 2, hp: 10, maxHp: 10, atk: 2, def: 0 }];
+    const cast = PD.useAbility(mage);
+    assert.ok(cast.ok);
+    assert.ok(cast.logs[0].indexOf("CAST SLIME") === 0);
+
+    const restored = PD.applySnapshot(PD.snapshot(save));
+    assert.strictEqual(restored.site.guardTurns, 0);
+});
+
+test("Room fork offers safe and risky deterministic outcomes", function () {
+    const run = PD.createRun("knight", 17);
+    const room = PD.currentRoom(run);
+    room.choice = { active: true, safe: false };
+    room.tiles[3] = room.tiles[3].slice(0, 2) + "S" + room.tiles[3].slice(3);
+    room.enemies = [{ type: "slime", x: 4, y: 3, hp: 4, maxHp: 4, atk: 2, def: 0 }];
+    const safe = PD.chooseRoomRoute(run, "safe");
+    assert.ok(safe.ok);
+    assert.ok(safe.logs.includes("SAFE ROUTE"));
+    assert.strictEqual(room.choice.active, false);
+    assert.strictEqual(room.tiles[3][2], ".");
+    assert.strictEqual(room.enemies.length, 0);
+
+    const risky = PD.createRun("knight", 17);
+    const riskyRoom = PD.currentRoom(risky);
+    riskyRoom.choice = { active: true, safe: false };
+    riskyRoom.tiles[3] = riskyRoom.tiles[3].slice(0, 2) + "R" + riskyRoom.tiles[3].slice(3);
+    const beforeGold = risky.gold;
+    const risk = PD.chooseRoomRoute(risky, "risk");
+    assert.ok(risk.ok);
+    assert.strictEqual(risky.gold, beforeGold + 10);
+    assert.strictEqual(riskyRoom.enemies.length, 1);
+    assert.strictEqual(riskyRoom.choice.route, "risk");
+    assert.strictEqual(PD.chooseRoomRoute(risky, "risk").ok, false);
+
+    const save = PD.createEmptySave();
+    save.site = risky;
+    save.run = risky;
+    const restored = PD.applySnapshot(PD.snapshot(save));
+    assert.strictEqual(restored.site.rooms[restored.site.roomId].choice.active, false);
+    assert.strictEqual(restored.site.rooms[restored.site.roomId].choice.route, "risk");
+});
+
 test("Scout Trap Evasion logic in simulation", function () {
     let evades = 0;
     const trials = 200;

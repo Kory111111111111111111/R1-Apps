@@ -146,6 +146,42 @@
             "OSBBBBBBBBBBBBSO",
             "OOOOOOOOOOOOOOOO"
         ],
+        safe: [
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSHSSSSSS",
+            "SSSSSSSSHHSSSSSS",
+            "SSSSSSSSHHSSSSSS",
+            "SSSSSSSSHHSSSSSS",
+            "SSSSSSSSHHSSSSSS",
+            "SSSSSSSSHHSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS"
+        ],
+        risk: [
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSRSSSSSS",
+            "SSSSSSSSRRSSSSSS",
+            "SSSSSSSSRRSSSSSS",
+            "SSSSSSSSRRSSSSSS",
+            "SSSSSSSSRRSSSSSS",
+            "SSSSSSSSRRSSSSSS",
+            "SSSSSSSSRRSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS"
+        ],
         stairs: [
             "SSSSSSSSSSSSSSSS",
             "SSSOOOOOOOOOOSSS",
@@ -574,6 +610,8 @@
         if (ch === ">") return "stairs";
         if (ch === "$") return "chest";
         if (ch === "^") return "trap";
+        if (ch === "S") return "safe";
+        if (ch === "R") return "risk";
         return "floor";
     }
 

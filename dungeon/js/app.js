@@ -743,7 +743,10 @@
             panelMetaEl.textContent = "SIDE TO KEEPGATE";
             hintEl.textContent = "side: town";
         } else if (mode === "play" && save.run) {
-            hintEl.textContent = "tap: go · side: wait · hold: pack";
+            const ability = save.run.classId === "knight" ? "guard" : (save.run.classId === "scout" ? "disarm" : "spell");
+            const activeChoice = save.run.roomChoice && save.run.roomChoice.active;
+            const choice = activeChoice ? " · walk S: safe · walk R: risk" : "";
+            hintEl.textContent = "tap: go · side: wait · hold: pack · " + ability + ": ability" + choice;
         }
         setStatus(hintEl ? hintEl.textContent : "");
     }
@@ -1035,8 +1038,12 @@
             return;
         }
         if (mode === "play" && save.run) {
-            PD.cycleFacing(save.run, delta);
-            render();
+            if (save.run.roomChoice && save.run.roomChoice.active) {
+                applyResult(PD.chooseRoomRoute(save.run, delta > 0 ? "risk" : "safe"));
+            } else {
+                PD.cycleFacing(save.run, delta);
+                render();
+            }
         }
     }
 
@@ -1290,7 +1297,11 @@
             return;
         }
         if (mode === "play" && save.run) {
-            applyResult(PD.waitTurn(save.run), "step");
+            if (save.run.roomChoice && save.run.roomChoice.active) {
+                applyResult(PD.chooseRoomRoute(save.run, "safe"));
+            } else {
+                applyResult(PD.waitTurn(save.run), "step");
+            }
         }
     }
 
@@ -1510,6 +1521,11 @@
                     playActResult(PD.tryAct(save.run));
                 } else {
                     onSideClick();
+                }
+                event.preventDefault();
+            } else if (key === "q" || key === "Q") {
+                if (mode === "play" && save.run) {
+                    playActResult(PD.useAbility(save.run));
                 }
                 event.preventDefault();
             } else if (key === " " || key === "5") {

@@ -288,6 +288,13 @@
             setTile(room, 3, 3, ">");
             reserved.push({ x: 3, y: 3 });
         }
+        if (opts.choice) {
+            room.choice = { active: true, safe: false, route: null, safeTile: { x: 2, y: 3 }, riskTile: { x: 4, y: 3 } };
+            setTile(room, 2, 3, "S");
+            setTile(room, 4, 3, "R");
+            reserved.push({ x: 2, y: 3 });
+            reserved.push({ x: 4, y: 3 });
+        }
 
         if (opts.cleared) {
             return;
@@ -373,7 +380,8 @@
                 tiles: blankTiles(),
                 doors: {},
                 enemies: [],
-                chest: null
+                chest: null,
+                choice: null
             });
         }
 
@@ -404,7 +412,8 @@
                 boss: room.kind === "stairs" && run.floor === MAX_FLOOR && siteLimit === MAX_FLOOR,
                 named: room.kind === "stairs" && !!run.namedLast && run.floor === siteLimit,
                 cleared: !!run.siteClearedReplay,
-                enemyPool: run.enemyPool
+                enemyPool: run.enemyPool,
+                choice: room.kind === "branch" && run.floor < siteLimit && !run.siteRoomCount
             });
         });
 
@@ -439,6 +448,7 @@
             roomId: 0,
             rooms: [],
             rngState: 0,
+            guardTurns: 0,
             siteId: siteId || (site && site.id) || "hold",
             maxSiteFloor: site && site.floors ? site.floors : MAX_FLOOR,
             siteRoomCount: site && site.rooms ? site.rooms : null,
@@ -481,7 +491,8 @@
             y: 3,
             roomId: 0,
             rooms: [],
-            rngState: 0
+            rngState: 0,
+            guardTurns: 0
         };
         generateFloor(run, rng);
         commitRng(run, rng);
@@ -609,8 +620,13 @@
 
     function attackHero(run, enemy, rng, logs) {
         const dmg = hitDamage(enemy.atk, run.def, rng);
-        run.hp = clamp(run.hp - dmg, 0, run.maxHp);
-        logs.push(enemy.type.toUpperCase() + " HIT " + dmg);
+        const reduced = run.guardTurns > 0 ? Math.max(0, Math.floor(dmg / 2)) : dmg;
+        run.hp = clamp(run.hp - reduced, 0, run.maxHp);
+        logs.push(enemy.type.toUpperCase() + " HIT " + reduced);
+        if (run.guardTurns > 0) {
+            run.guardTurns = 0;
+            logs.push("GUARD BREAKS");
+        }
     }
 
     function stepEnemy(run, room, enemy, rng, logs) {
@@ -741,6 +757,9 @@
         }
 
         const tile = getTile(room, nx, ny);
+        if (tile === "S" || tile === "R") {
+            return chooseRoomRoute(run, tile === "S" ? "safe" : "risk");
+        }
         if (tile === "#") {
             logs.push("BLOCKED");
             commitRng(run, rng);
@@ -813,6 +832,94 @@
             setTile(room, nx, ny, ".");
         }
         return finishTurn(run, rng, logs);
+    }
+
+    function useAbility(run) {
+        const logs = [];
+        const rng = rngFromRun(run);
+        if (!run || !currentRoom(run)) {
+            return { ok: false, logs: ["NO ROOM"] };
+        }
+        const room = currentRoom(run);
+        if (run.classId === "knight") {
+            if (run.guardTurns > 0) {
+                logs.push("ALREADY GUARDING");
+                commitRng(run, rng);
+                return { ok: false, logs: logs };
+            }
+            run.guardTurns = 1;
+            logs.push("GUARD UP");
+            commitRng(run, rng);
+            return { ok: true, logs: logs, skipEnemies: true };
+        }
+        if (run.classId === "scout") {
+            const vec = DIR[run.facing];
+            const tx = run.x + vec.x;
+            const ty = run.y + vec.y;
+            const tile = getTile(room, tx, ty);
+            if (tile === "^") {
+                setTile(room, tx, ty, ".");
+                logs.push("TRAP DISARMED");
+                return finishTurn(run, rng, logs);
+            }
+            logs.push("NO TRAP");
+            commitRng(run, rng);
+            return { ok: false, logs: logs };
+        }
+        if (run.classId === "mage") {
+            const vec = DIR[run.facing];
+            let enemy = null;
+            for (let distance = 1; distance <= 3; distance += 1) {
+                enemy = enemyAt(room, run.x + vec.x * distance, run.y + vec.y * distance);
+                if (enemy) break;
+                if (getTile(room, run.x + vec.x * distance, run.y + vec.y * distance) === "#") break;
+            }
+            if (!enemy) {
+                logs.push("NO TARGET");
+                commitRng(run, rng);
+                return { ok: false, logs: logs };
+            }
+            const damage = Math.max(2, run.atk - enemy.def + 1);
+            enemy.hp -= damage;
+            logs.push("CAST " + enemy.type.toUpperCase() + " " + damage);
+            if (enemy.hp <= 0) {
+                enemy.hp = 0;
+                logs.push(enemy.type.toUpperCase() + " DOWN");
+                room.enemies = room.enemies.filter(function (e) { return e.hp > 0; });
+            }
+            return finishTurn(run, rng, logs);
+        }
+        logs.push("NO ABILITY");
+        commitRng(run, rng);
+        return { ok: false, logs: logs };
+    }
+
+    function chooseRoomRoute(run, route) {
+        const room = currentRoom(run);
+        if (!room || !room.choice || !room.choice.active || (route !== "safe" && route !== "risk")) {
+            return { ok: false, logs: ["NO CHOICE"] };
+        }
+        const rng = rngFromRun(run);
+        room.choice.active = false;
+        room.choice.safe = route === "safe";
+        const safeTile = room.choice.safeTile || { x: 2, y: 3 };
+        const riskTile = room.choice.riskTile || { x: 4, y: 3 };
+        setTile(room, safeTile.x, safeTile.y, ".");
+        setTile(room, riskTile.x, riskTile.y, ".");
+        const logs = [];
+        if (route === "safe") {
+            room.enemies = [];
+            logs.push("SAFE ROUTE");
+        } else {
+            run.gold += 10;
+            logs.push("RISK ROUTE +10 GOLD");
+            if (!room.enemies.length) {
+                room.enemies.push(makeEnemy(pickEnemyType(run.floor, rng, run.enemyPool), 4, 3, run.floor));
+            }
+        }
+        room.choice.route = route;
+        commitRng(run, rng);
+        return { ok: true, logs: logs, roomChoice: true, skipEnemies: true };
     }
 
     function waitTurn(run) {
@@ -958,6 +1065,8 @@
             roomId: run.roomId,
             rooms: run.rooms,
             rngState: run.rngState,
+            guardTurns: run.guardTurns || 0,
+            roomChoice: run.roomChoice ? { active: !!run.roomChoice.active, safe: !!run.roomChoice.safe } : null,
             siteId: run.siteId || null,
             maxSiteFloor: run.maxSiteFloor || null,
             siteRoomCount: run.siteRoomCount || null,
@@ -1031,7 +1140,8 @@
             tiles: tiles,
             doors: doors,
             enemies: enemies,
-            chest: chest
+            chest: chest,
+            choice: raw.choice && typeof raw.choice === "object" ? { active: !!raw.choice.active, safe: !!raw.choice.safe, route: raw.choice.route === "safe" || raw.choice.route === "risk" ? raw.choice.route : null, safeTile: { x: 2, y: 3 }, riskTile: { x: 4, y: 3 } } : null
         };
     }
 
@@ -1076,6 +1186,8 @@
             roomId: roomId,
             rooms: rooms,
             rngState: (Number(raw.rngState) || 0) >>> 0,
+            guardTurns: raw.guardTurns > 0 ? 1 : 0,
+            roomChoice: raw.roomChoice && typeof raw.roomChoice === "object" ? { active: !!raw.roomChoice.active, safe: !!raw.roomChoice.safe } : null,
             siteId: typeof raw.siteId === "string" ? raw.siteId : null,
             maxSiteFloor: Number(raw.maxSiteFloor) > 0 ? Math.min(MAX_FLOOR, Math.round(Number(raw.maxSiteFloor))) : null,
             siteRoomCount: Number(raw.siteRoomCount) > 0 ? Math.round(Number(raw.siteRoomCount)) : null,
@@ -1258,6 +1370,8 @@
     global.PocketDungeon.pathTo = pathTo;
     global.PocketDungeon.tryAct = tryAct;
     global.PocketDungeon.waitTurn = waitTurn;
+    global.PocketDungeon.chooseRoomRoute = chooseRoomRoute;
+    global.PocketDungeon.useAbility = useAbility;
     global.PocketDungeon.useItem = useItem;
     global.PocketDungeon.useItemOnHero = useItemOnHero;
     global.PocketDungeon.cannedRoomLine = cannedRoomLine;
