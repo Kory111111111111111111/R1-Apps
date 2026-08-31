@@ -2,7 +2,23 @@
     const MAP_SIZE = 7;
     const MAX_FLOOR = 8;
     const PACK_MAX = 5;
-    const SNAPSHOT_VERSION = 2;
+    const SNAPSHOT_VERSION = 3;
+    const LEVEL_CAP = 30;
+    const BOSS_HEAVY_COOLDOWN = 2;
+    const REWARD_BOONS = {
+        wraith: { phaseStep: "PHASE STEP", description: "NEXT MOVE MAY CROSS A WALL" },
+        ogre: { lastStand: "LAST STAND", description: "NEXT HEAVY HIT DEALS 0" }
+    };
+    const FLOOR_THEMES = {
+        1: { name: "DAMP CELLARS", line: "WATER DRIPS BETWEEN THE STONES.", trapChance: 25 },
+        2: { name: "RAT RUNS", line: "SMALL TEETH SCRATCH IN THE WALLS.", trapChance: 28 },
+        3: { name: "SALT VEINS", line: "WHITE SALT CRUSTS THE BLACK FLOOR.", trapChance: 32 },
+        4: { name: "WRAITH HALL", line: "THE AIR REMEMBERS EVERY DEATH.", trapChance: 38 },
+        5: { name: "BONE GALLERY", line: "OLD ARMOR WATCHES FROM THE DUST.", trapChance: 40 },
+        6: { name: "COLD DEEP", line: "YOUR BREATH DOES NOT RISE.", trapChance: 45 },
+        7: { name: "IRON DESCENT", line: "THE STONE SHUDDERS BELOW.", trapChance: 50 },
+        8: { name: "OGRE HOLD", line: "SOMETHING HUGE BREATHES AHEAD.", trapChance: 55 }
+    };
     const FACINGS = ["N", "E", "S", "W"];
     const OPP = { N: "S", E: "W", S: "N", W: "E" };
     const DIR = {
@@ -25,24 +41,46 @@
     };
 
     const CLASSES = {
-        knight: { id: "knight", name: "KNIGHT", hp: 20, atk: 4, def: 2, desc: "HEAVY ARMOR · TANK" },
-        scout: { id: "scout", name: "SCOUT", hp: 16, atk: 4, def: 1, desc: "AGILE · EVADES TRAPS" },
-        mage: { id: "mage", name: "MAGE", hp: 14, atk: 5, def: 0, desc: "SPELLCASTER · BLADE" }
+        knight: { id: "knight", name: "KNIGHT", hp: 20, atk: 4, def: 2, desc: "GUARD: HALVE DMG + COUNTER", passive: "COUNTERSTRIKE", ability: "GUARD", abilityDesc: "HALVES INCOMING DMG. COUNTERS FOR 1. HOLDS UNTIL HIT." },
+        scout: { id: "scout", name: "SCOUT", hp: 16, atk: 4, def: 1, desc: "FIRST STRIKE + TRAP SIGHT", passive: "FIRST STRIKE", ability: "DISARM", abilityDesc: "DISARMS TRAP AHEAD. FIRST HIT EACH FIGHT +1 DMG." },
+        mage: { id: "mage", name: "MAGE", hp: 14, atk: 5, def: 0, desc: "3-TILE SPELL · PIERCE", passive: "PIERCE", ability: "SPELL", abilityDesc: "BOLTS 3 TILES. 30% PIERCES TO A SECOND FOE." }
     };
     const CLASS_ORDER = ["knight", "scout", "mage"];
 
     const ENEMY_DEFS = {
-        slime: { hp: 4, atk: 2, def: 0, debut: 1 },
-        bat: { hp: 3, atk: 3, def: 0, debut: 2 },
-        skeleton: { hp: 6, atk: 3, def: 0, debut: 4 },
-        ogre: { hp: 20, atk: 5, def: 1, debut: 8 }
+        slime: { hp: 4, atk: 2, def: 0, debut: 1, gold: 2, xp: 3, ai: "slow", name: "SLIME" },
+        rat: { hp: 3, atk: 2, def: 0, debut: 1, gold: 1, xp: 2, ai: "swarm", name: "RAT" },
+        bat: { hp: 3, atk: 3, def: 0, debut: 2, gold: 3, xp: 4, ai: "erratic", name: "BAT" },
+        skeleton: { hp: 6, atk: 3, def: 0, debut: 4, gold: 5, xp: 8, ai: "relentless", name: "SKELETON" },
+        ghoul: { hp: 8, atk: 4, def: 0, debut: 4, gold: 6, xp: 10, ai: "patient", name: "GHOUL" },
+        ogre: { hp: 20, atk: 5, def: 1, debut: 8, gold: 30, xp: 60, ai: "ogre", name: "OGRE" },
+        wraith: { hp: 14, atk: 4, def: 0, debut: 4, gold: 20, xp: 25, ai: "phase", name: "WRAITH" }
     };
 
-    const ITEM_IDS = ["potion", "blade", "mail"];
+    const GEAR_SLOTS = ["weapon", "armor", "charm"];
+    const GEAR_DEFS = {
+        blade: { slot: "weapon", atk: 1 },
+        iron_blade: { slot: "weapon", atk: 3 },
+        mail: { slot: "armor", def: 1 },
+        shield: { slot: "armor", def: 2 },
+        iron_mail: { slot: "armor", def: 3 },
+        talisman: { slot: "charm", hp: 6 },
+        drain_charm: { slot: "charm", hp: 2, onKillHeal: 1 },
+        ward_charm: { slot: "charm", hp: 2, poisonImmune: true }
+    };
+
+    const ITEM_IDS = ["potion", "greater_potion", "blade", "mail", "shield", "iron_blade", "iron_mail", "talisman", "drain_charm", "ward_charm"];
     const ITEM_INFO = {
         potion: { name: "POTION", effect: "+6 HP", type: "heal" },
-        blade: { name: "BLADE", effect: "+1 ATK", type: "buff" },
-        mail: { name: "MAIL", effect: "+1 DEF", type: "buff" },
+        greater_potion: { name: "G.POTION", effect: "+12 HP", type: "heal" },
+        blade: { name: "BLADE", effect: "+1 ATK", type: "gear", slot: "weapon" },
+        iron_blade: { name: "IRON BLADE", effect: "+3 ATK", type: "gear", slot: "weapon" },
+        mail: { name: "MAIL", effect: "+1 DEF", type: "gear", slot: "armor" },
+        shield: { name: "SHIELD", effect: "+2 DEF", type: "gear", slot: "armor" },
+        iron_mail: { name: "IRON MAIL", effect: "+3 DEF", type: "gear", slot: "armor" },
+        talisman: { name: "TALISMAN", effect: "+6 HP", type: "gear", slot: "charm" },
+        drain_charm: { name: "DRAIN CHARM", effect: "+2 HP · +1HP/KILL", type: "gear", slot: "charm" },
+        ward_charm: { name: "WARD CHARM", effect: "+2 HP · POISON IMMUNE", type: "gear", slot: "charm" },
         coin: { name: "COIN", effect: "+10 GOLD", type: "gold" }
     };
 
@@ -124,6 +162,171 @@
 
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    function xpForNext(level) {
+        return 8 + Math.max(1, level) * 4;
+    }
+
+    function levelGains(level) {
+        return {
+            hp: 2,
+            atk: level % 2 === 0 ? 1 : 0,
+            def: level % 3 === 0 ? 1 : 0
+        };
+    }
+
+    function emptyGear() {
+        return { weapon: null, armor: null, charm: null };
+    }
+
+    function normalizeGear(raw) {
+        const gear = emptyGear();
+        if (!raw || typeof raw !== "object") {
+            return gear;
+        }
+        GEAR_SLOTS.forEach(function (slot) {
+            const id = raw[slot];
+            if (id && GEAR_DEFS[id] && GEAR_DEFS[id].slot === slot) {
+                gear[slot] = id;
+            }
+        });
+        return gear;
+    }
+
+    function gearBonus(gear) {
+        const bonus = { atk: 0, def: 0, hp: 0 };
+        if (!gear) {
+            return bonus;
+        }
+        GEAR_SLOTS.forEach(function (slot) {
+            const def = gear[slot] && GEAR_DEFS[gear[slot]];
+            if (!def) {
+                return;
+            }
+            bonus.atk += def.atk || 0;
+            bonus.def += def.def || 0;
+            bonus.hp += def.hp || 0;
+        });
+        return bonus;
+    }
+
+    function hasCharm(run, id) {
+        return !!(run && run.gear && run.gear.charm === id);
+    }
+
+    function grantXp(run, amount, logs) {
+        if (!run || !(amount > 0)) {
+            return 0;
+        }
+        run.xp = Math.max(0, (run.xp || 0) + amount);
+        run.xpEarned = (run.xpEarned || 0) + amount;
+        let levels = 0;
+        let gainHp = 0;
+        let gainAtk = 0;
+        let gainDef = 0;
+        while ((run.level || 1) < LEVEL_CAP && run.xp >= xpForNext(run.level || 1)) {
+            run.level = (run.level || 1) + 1;
+            run.xp -= xpForNext(run.level - 1);
+            const gains = levelGains(run.level);
+            run.maxHp += gains.hp;
+            run.atk += gains.atk;
+            run.def += gains.def;
+            run.hp = run.maxHp;
+            levels += 1;
+            gainHp += gains.hp;
+            gainAtk += gains.atk;
+            gainDef += gains.def;
+        }
+        if (levels > 0 && logs) {
+            logs.push("LEVEL UP " + run.level + " · +" + gainHp + "HP" + (gainAtk ? " +" + gainAtk + "ATK" : "") + (gainDef ? " +" + gainDef + "DEF" : "") + " · FULL HEAL");
+        }
+        if ((run.level || 1) >= LEVEL_CAP) {
+            run.xp = 0;
+        }
+        return levels;
+    }
+
+    function grantXpToHero(hero, amount, logs) {
+        if (!hero) {
+            return 0;
+        }
+        hero.xp = Math.max(0, (hero.xp || 0) + Math.max(0, amount));
+        let levels = 0;
+        while ((hero.level || 1) < LEVEL_CAP && hero.xp >= xpForNext(hero.level || 1)) {
+            hero.level = (hero.level || 1) + 1;
+            hero.xp -= xpForNext(hero.level - 1);
+            const gains = levelGains(hero.level);
+            hero.maxHp = (hero.maxHp || 0) + gains.hp;
+            hero.atk = (hero.atk || 0) + gains.atk;
+            hero.def = (hero.def || 0) + gains.def;
+            hero.hp = hero.maxHp;
+            levels += 1;
+        }
+        if (levels > 0 && logs) {
+            logs.push("LEVEL UP " + hero.level);
+        }
+        if ((hero.level || 1) >= LEVEL_CAP) {
+            hero.xp = 0;
+        }
+        return levels;
+    }
+
+    function runGearBonus(run) {
+        if (!run) {
+            return { atk: 0, def: 0, hp: 0 };
+        }
+        return {
+            atk: Math.max(0, Math.round(Number(run.gearAtk) || 0)),
+            def: Math.max(0, Math.round(Number(run.gearDef) || 0)),
+            hp: Math.max(0, Math.round(Number(run.gearHp) || 0))
+        };
+    }
+
+    function stripRunGear(run) {
+        if (!run) {
+            return null;
+        }
+        const bonus = runGearBonus(run);
+        const maxHp = Math.max(1, (run.maxHp || 1) - bonus.hp);
+        return {
+            atk: Math.max(0, (run.atk || 0) - bonus.atk),
+            def: Math.max(0, (run.def || 0) - bonus.def),
+            maxHp: maxHp,
+            hp: clamp(run.hp || 0, 0, maxHp)
+        };
+    }
+
+    function syncHeroFromRun(hero, run) {
+        if (!hero || !run) {
+            return hero;
+        }
+        const base = stripRunGear(run);
+        hero.classId = run.classId || hero.classId;
+        hero.maxHp = base.maxHp;
+        hero.hp = base.hp;
+        hero.atk = base.atk;
+        hero.def = base.def;
+        hero.gold = Math.max(0, Math.round(Number(run.gold) || 0));
+        hero.pack = Array.isArray(run.pack) ? run.pack.slice() : [];
+        // Return gear equipped during the run back to the pack so it is not silently
+        // lost, then drop any copy of the hero's persistent gear to avoid duplication.
+        if (run.gear) {
+            GEAR_SLOTS.forEach(function (slot) {
+                const id = run.gear[slot];
+                if (id && hero.pack.length < PACK_MAX) {
+                    hero.pack.push(id);
+                }
+            });
+        }
+        if (hero.gear) {
+            hero.pack = hero.pack.filter(function (id) {
+                return id !== hero.gear.weapon && id !== hero.gear.armor && id !== hero.gear.charm;
+            });
+        }
+        hero.level = Math.max(1, Math.round(Number(run.level) || 1));
+        hero.xp = Math.max(0, Math.round(Number(run.xp) || 0));
+        return hero;
     }
 
     function getTile(room, x, y) {
@@ -237,39 +440,105 @@
         return true;
     }
 
-    function makeEnemy(type, x, y, floor) {
+    function makeEnemy(type, x, y, floor, tier) {
         const def = ENEMY_DEFS[type];
         const bonus = Math.max(0, floor - def.debut);
-        const hp = def.hp + bonus;
+        const t = Math.max(0, Math.round(Number(tier) || 0));
+        const hp = def.hp + bonus + t;
         return {
             type: type,
             x: x,
             y: y,
             hp: hp,
+            windup: 0,
             maxHp: hp,
-            atk: def.atk,
-            def: def.def
+            atk: def.atk + Math.floor(bonus / 3) + Math.floor(t / 2),
+            def: def.def,
+            gold: (def.gold || 0) + t,
+            xpBonus: t,
+            ai: def.ai || "slow",
+            heavyCooldown: 0,
+            heavyTelegraph: false
         };
+    }
+
+    function enemyXp(enemy) {
+        if (!enemy) {
+            return 0;
+        }
+        const def = ENEMY_DEFS[enemy.type] || {};
+        return Math.max(0, Math.round(Number(def.xp) || 0) + Math.round(Number(enemy.xpBonus) || 0));
+    }
+
+    function enemyName(type) {
+        return (ENEMY_DEFS[type] && ENEMY_DEFS[type].name) || String(type || "").toUpperCase();
+    }
+
+    function killEnemy(run, room, enemy, logs) {
+        if (!enemy || enemy.hp > 0) {
+            return false;
+        }
+        const name = enemyName(enemy.type);
+        logs.push(name + " DOWN");
+        const dropGold = enemy.gold || (ENEMY_DEFS[enemy.type] && ENEMY_DEFS[enemy.type].gold) || 0;
+        if (dropGold > 0) {
+            run.gold += dropGold;
+            logs.push("+" + dropGold + " GOLD");
+        }
+        run.kills = (run.kills || 0) + 1;
+        run.slainTypes = run.slainTypes || {};
+        run.slainTypes[enemy.type] = (run.slainTypes[enemy.type] || 0) + 1;
+        const xp = enemyXp(enemy);
+        if (xp > 0) {
+            logs.push("+" + xp + " XP");
+            grantXp(run, xp, logs);
+        }
+        if (hasCharm(run, "drain_charm") && run.hp > 0 && run.hp < run.maxHp) {
+            run.hp = clamp(run.hp + 1, 0, run.maxHp);
+            logs.push("DRAIN +1");
+        }
+        if (room) {
+            room.enemies = room.enemies.filter(function (e) {
+                return e.hp > 0;
+            });
+            if ((enemy.type === "wraith" || enemy.type === "ogre") && room.kind === "stairs") {
+                room.reward = {
+                    active: true,
+                    boss: enemy.type,
+                    choice: null,
+                    options: enemy.type === "ogre" ? ["gold", "heal", "renown"] : ["heal", "gold", "renown"],
+                    boon: enemy.type === "ogre" ? "lastStand" : "phaseStep"
+                };
+                logs.push("REWARD AWAITS");
+            }
+        }
+        return true;
     }
 
     function pickLoot(rng) {
         const roll = rng.int(1, 100);
-        if (roll <= 50) {
+        if (roll <= 45) {
             return "potion";
         }
-        if (roll <= 75) {
+        if (roll <= 65) {
             return "coin";
         }
-        if (roll <= 90) {
+        if (roll <= 78) {
             return "blade";
         }
-        return "mail";
+        if (roll <= 88) {
+            return "mail";
+        }
+        if (roll <= 96) {
+            return "greater_potion";
+        }
+        return "shield";
     }
 
     function pickEnemyType(floor, rng, pool) {
-        const source = pool && pool.length ? pool.slice() : ["slime", "bat", "skeleton"];
+        const source = pool && pool.length ? pool.slice() : ["slime", "rat", "bat", "skeleton", "ghoul"];
         const eligible = source.filter(function (id) {
-            if (!ENEMY_DEFS[id] || id === "ogre") {
+            if (!ENEMY_DEFS[id] || id === "ogre" || id === "wraith") {
                 return false;
             }
             if (pool && pool.length) {
@@ -300,18 +569,41 @@
             return;
         }
 
+        const tier = Math.max(0, Math.round(Number(opts.tier) || 0));
+
         if (opts.boss) {
             const ogrePos = { x: 3, y: 2 };
             if (getTile(room, ogrePos.x, ogrePos.y) !== ".") {
                 ogrePos.y = 4;
             }
-            room.enemies.push(makeEnemy("ogre", ogrePos.x, ogrePos.y, floor));
+            room.enemies.push(makeEnemy("ogre", ogrePos.x, ogrePos.y, floor, tier));
             reserved.push(ogrePos);
+            return;
+        }
+        if (opts.midBoss) {
+            const wraithPos = { x: 3, y: 2 };
+            if (getTile(room, wraithPos.x, wraithPos.y) !== ".") {
+                wraithPos.y = 4;
+            }
+            room.enemies.push(makeEnemy("wraith", wraithPos.x, wraithPos.y, floor, tier));
+            reserved.push(wraithPos);
             return;
         }
 
         if (opts.start) {
             return;
+        }
+        if (opts.hazard === "reinforced") {
+            room.hazard = "reinforced";
+            if (room.enemies.length) {
+                room.enemies.forEach(function (enemy) {
+                    enemy.hp += 2;
+                    enemy.maxHp += 2;
+                });
+            }
+        }
+        if (opts.hazard === "blood") {
+            room.hazard = "blood";
         }
 
         const spots = interiorSpots(room).filter(function (p) {
@@ -328,21 +620,26 @@
 
         if (opts.named) {
             const spot = takeSpot() || { x: 3, y: 2 };
-            const wight = makeEnemy("skeleton", spot.x, spot.y, floor);
+            const wight = makeEnemy("skeleton", spot.x, spot.y, floor, tier);
             wight.hp += 6;
             wight.maxHp += 6;
             wight.atk += 1;
+            wight.xpBonus = (wight.xpBonus || 0) + 6;
             room.enemies.push(wight);
             return;
         }
 
-        const enemyCount = rng.int(0, 2);
+        var maxEnemies = 2;
+        var minEnemies = 0;
+        if (floor >= 4) { maxEnemies = 3; minEnemies = 1; }
+        if (floor >= 6) { maxEnemies = 4; minEnemies = 1; }
+        const enemyCount = rng.int(minEnemies, maxEnemies);
         for (let i = 0; i < enemyCount; i += 1) {
             const spot = takeSpot();
             if (!spot) {
                 break;
             }
-            room.enemies.push(makeEnemy(pickEnemyType(floor, rng, opts.enemyPool), spot.x, spot.y, floor));
+            room.enemies.push(makeEnemy(pickEnemyType(floor, rng, opts.enemyPool), spot.x, spot.y, floor, tier));
             reserved.push(spot);
         }
 
@@ -355,10 +652,12 @@
             }
         }
 
-        if (rng.int(1, 100) <= 20) {
+        var trapChance = (FLOOR_THEMES[floor] && FLOOR_THEMES[floor].trapChance) || 25;
+        if (rng.int(1, 100) <= trapChance) {
             const spot = takeSpot();
             if (spot) {
-                setTile(room, spot.x, spot.y, "^");
+                    const usePoison = floor >= 3 && rng.int(1, 100) <= 50;
+                setTile(room, spot.x, spot.y, usePoison ? "~" : "^");
             }
         }
     }
@@ -381,7 +680,8 @@
                 doors: {},
                 enemies: [],
                 chest: null,
-                choice: null
+                choice: null,
+                theme: (FLOOR_THEMES[run.floor] && FLOOR_THEMES[run.floor].name) || "DARK STONE"
             });
         }
 
@@ -405,15 +705,31 @@
         rooms[backbone - 1].kind = "stairs";
 
         const siteLimit = run.maxSiteFloor || MAX_FLOOR;
+        const isHoldSite = !run.siteId || run.siteId === "hold";
+        const midBoss = isHoldSite && run.floor === 4;
         rooms.forEach(function (room) {
+            var pool = run.enemyPool;
+            if (!pool && isHoldSite) {
+                if (run.floor <= 2) {
+                    pool = ["slime", "rat", "bat"];
+                } else if (run.floor <= 5) {
+                    pool = ["slime", "bat", "skeleton", "ghoul"];
+                } else {
+                    pool = ["bat", "skeleton", "ghoul"];
+                }
+            }
             populateRoom(room, run.floor, rng, {
                 start: room.kind === "start",
                 stairs: room.kind === "stairs",
                 boss: room.kind === "stairs" && run.floor === MAX_FLOOR && siteLimit === MAX_FLOOR,
+                midBoss: room.kind === "stairs" && midBoss,
                 named: room.kind === "stairs" && !!run.namedLast && run.floor === siteLimit,
-                cleared: !!run.siteClearedReplay,
-                enemyPool: run.enemyPool,
-                choice: room.kind === "branch" && run.floor < siteLimit && !run.siteRoomCount
+                cleared: !!run.siteClearedReplay && !(run.contract > 0),
+                tier: run.contract || 0,
+                enemyPool: pool,
+                choice: room.kind === "branch" && run.floor < siteLimit && !run.siteRoomCount,
+                hazard: run.floor >= 5 && room.kind !== "start" && room.kind !== "stairs"
+                    ? (run.floor >= 7 ? "blood" : "reinforced") : null
             });
         });
 
@@ -422,9 +738,10 @@
         run.x = 3;
         run.y = 3;
         run.facing = "S";
+        run.firstStrikeUsed = false;
     }
 
-    function createSiteRun(hero, siteId, seed, flags) {
+    function createSiteRun(hero, siteId, seed, flags, contract) {
         if (!hero || !CLASSES[hero.classId]) {
             throw new Error("Unknown hero for site: " + (hero && hero.classId));
         }
@@ -432,16 +749,26 @@
         const site = world && world.sites && world.sites[siteId];
         const useSeed = (seed == null ? newSeed() : seed) >>> 0;
         const rng = createRng(useSeed);
+        const gear = gearBonus(hero.gear);
+        const maxHp = Math.max(1, (hero.maxHp || CLASSES[hero.classId].hp) + gear.hp);
         const run = {
             seed: useSeed,
             classId: hero.classId,
             floor: 1,
             gold: Math.max(0, hero.gold || 0),
-            hp: Math.max(0, hero.hp || 0),
-            maxHp: Math.max(1, hero.maxHp || CLASSES[hero.classId].hp),
-            atk: Math.max(0, hero.atk || 0),
-            def: Math.max(0, hero.def || 0),
+            hp: clamp(Math.max(0, hero.hp || 0), 0, maxHp),
+            maxHp: maxHp,
+            atk: Math.max(0, hero.atk || 0) + gear.atk,
+            def: Math.max(0, hero.def || 0) + gear.def,
             pack: Array.isArray(hero.pack) ? hero.pack.slice() : [],
+            level: Math.max(1, Math.round(Number(hero.level) || 1)),
+            xp: Math.max(0, Math.round(Number(hero.xp) || 0)),
+            xpEarned: 0,
+            gearAtk: gear.atk,
+            gearDef: gear.def,
+            gearHp: gear.hp,
+            gear: normalizeGear(hero.gear),
+            contract: Math.max(0, Math.round(Number(contract) || 0)),
             facing: "S",
             x: 3,
             y: 3,
@@ -449,6 +776,12 @@
             rooms: [],
             rngState: 0,
             guardTurns: 0,
+            kills: 0,
+            slainTypes: {},
+            poisonTurns: 0,
+            firstStrikeUsed: false,
+            phaseStep: 0,
+            lastStand: 0,
             siteId: siteId || (site && site.id) || "hold",
             maxSiteFloor: site && site.floors ? site.floors : MAX_FLOOR,
             siteRoomCount: site && site.rooms ? site.rooms : null,
@@ -486,13 +819,27 @@
             atk: cls.atk,
             def: cls.def,
             pack: startingPack,
+            level: 1,
+            xp: 0,
+            xpEarned: 0,
+            gearAtk: 0,
+            gearDef: 0,
+            gearHp: 0,
+            gear: emptyGear(),
+            contract: 0,
             facing: "S",
             x: 3,
             y: 3,
             roomId: 0,
             rooms: [],
             rngState: 0,
-            guardTurns: 0
+            guardTurns: 0,
+            kills: 0,
+            slainTypes: {},
+            poisonTurns: 0,
+            firstStrikeUsed: false,
+            phaseStep: 0,
+            lastStand: 0
         };
         generateFloor(run, rng);
         commitRng(run, rng);
@@ -532,7 +879,7 @@
         if (tile === "$" || tile === "+" || tile === ">") {
             return isDest;
         }
-        return tile === "." || tile === "^";
+        return tile === "." || tile === "^" || tile === "~";
     }
 
     function pathTo(run, tx, ty) {
@@ -600,6 +947,15 @@
         });
     }
 
+    function wraithAlive(room) {
+        if (!room || !room.enemies) {
+            return false;
+        }
+        return room.enemies.some(function (e) {
+            return e.type === "wraith" && e.hp > 0;
+        });
+    }
+
     function canEnemyOccupy(run, room, x, y, self) {
         if (x < 1 || y < 1 || x > MAP_SIZE - 2 || y > MAP_SIZE - 2) {
             return false;
@@ -620,25 +976,41 @@
 
     function attackHero(run, enemy, rng, logs) {
         const dmg = hitDamage(enemy.atk, run.def, rng);
-        const reduced = run.guardTurns > 0 ? Math.max(0, Math.floor(dmg / 2)) : dmg;
+        const guarded = run.guardTurns > 0;
+        const reduced = guarded ? Math.max(0, Math.floor(dmg / 2)) : dmg;
         run.hp = clamp(run.hp - reduced, 0, run.maxHp);
-        logs.push(enemy.type.toUpperCase() + " HIT " + reduced);
-        if (run.guardTurns > 0) {
+        const name = (ENEMY_DEFS[enemy.type] && ENEMY_DEFS[enemy.type].name) || enemy.type.toUpperCase();
+        logs.push(name + " HIT " + reduced);
+        if (guarded) {
             run.guardTurns = 0;
             logs.push("GUARD BREAKS");
+            if (run.classId === "knight" && enemy.hp > 0) {
+                const counter = Math.max(1, Math.floor(run.atk / 2));
+                enemy.hp -= counter;
+                logs.push("COUNTER " + counter);
+                if (enemy.hp <= 0) {
+                    enemy.hp = 0;
+                    killEnemy(run, currentRoom(run), enemy, logs);
+                }
+            }
         }
     }
 
-    function stepEnemy(run, room, enemy, rng, logs) {
-        if (enemy.hp <= 0) {
-            return;
+    function tryMoveStep(run, room, enemy, nx, ny) {
+        if (nx === enemy.x && ny === enemy.y) {
+            return false;
         }
+        if (canEnemyOccupy(run, room, nx, ny, enemy)) {
+            enemy.x = nx;
+            enemy.y = ny;
+            return true;
+        }
+        return false;
+    }
+
+    function chaseHero(run, room, enemy, rng, range) {
         const dist = Math.abs(enemy.x - run.x) + Math.abs(enemy.y - run.y);
-        if (dist === 1) {
-            attackHero(run, enemy, rng, logs);
-            return;
-        }
-        if (dist > 4) {
+        if (dist > range) {
             return;
         }
         const dx = Math.sign(run.x - enemy.x);
@@ -648,16 +1020,143 @@
             ? [{ x: enemy.x + dx, y: enemy.y }, { x: enemy.x, y: enemy.y + dy }]
             : [{ x: enemy.x, y: enemy.y + dy }, { x: enemy.x + dx, y: enemy.y }];
         for (let i = 0; i < attempts.length; i += 1) {
-            const n = attempts[i];
-            if (n.x === enemy.x && n.y === enemy.y) {
-                continue;
-            }
-            if (canEnemyOccupy(run, room, n.x, n.y, enemy)) {
-                enemy.x = n.x;
-                enemy.y = n.y;
+            if (tryMoveStep(run, room, enemy, attempts[i].x, attempts[i].y)) {
                 return;
             }
         }
+    }
+
+    function stepEnemy(run, room, enemy, rng, logs) {
+        if (enemy.hp <= 0) {
+            return;
+        }
+        enemy.telegraph = false;
+        const dist = Math.abs(enemy.x - run.x) + Math.abs(enemy.y - run.y);
+        if (enemy.heavyCooldown > 0) enemy.heavyCooldown -= 1;
+        if (enemy.windup > 0) {
+            enemy.windup -= 1;
+            enemy.telegraph = true;
+            logs.push((ENEMY_DEFS[enemy.type] || {}).name + " HUNTS");
+            if (enemy.windup === 0) {
+                attackHero(run, enemy, rng, logs);
+            }
+            return;
+        }
+        if (enemy.heavyTelegraph) {
+            const heavy = enemy.type === "ogre" ? 4 : 3;
+                const boonHeavy = run.lastStand > 0;
+            const guardedHeavy = boonHeavy ? 0 : (run.guardTurns > 0 ? Math.max(0, Math.floor(heavy / 2)) : heavy);
+            run.hp = clamp(run.hp - guardedHeavy, 0, run.maxHp);
+            if (boonHeavy) {
+                run.lastStand -= 1;
+                logs.push("LAST STAND HOLDS");
+            }
+            if (run.guardTurns > 0) run.guardTurns = 0;
+            logs.push((ENEMY_DEFS[enemy.type] || {}).name + " SMASH " + guardedHeavy);
+            enemy.heavyTelegraph = false;
+            enemy.heavyCooldown = BOSS_HEAVY_COOLDOWN;
+            return;
+        }
+        if (dist === 1) {
+            if (enemy.type === "rat" && rng.int(1, 100) <= 25) {
+                const bite = Math.max(1, hitDamage(enemy.atk, run.def, rng) - 1);
+                run.hp = clamp(run.hp - bite, 0, run.maxHp);
+                if (hasCharm(run, "ward_charm")) {
+                    logs.push("RAT BITE " + bite + " · WARDED");
+                } else {
+                    run.poisonTurns = Math.max(run.poisonTurns || 0, 2);
+                    logs.push("RAT BITE " + bite + " · DISEASE");
+                }
+                return;
+            }
+            if (enemy.type === "ghoul" && enemy.windup <= 0 && rng.int(1, 100) <= 35) {
+                enemy.windup = 1;
+                enemy.telegraph = true;
+                logs.push("GHOUL HUNTS");
+                return;
+            }
+            if ((enemy.type === "ogre" || enemy.type === "wraith") && enemy.heavyCooldown <= 0) {
+                enemy.heavyTelegraph = true;
+                enemy.telegraph = true;
+                logs.push((ENEMY_DEFS[enemy.type] || {}).name + " RAISES A BLOW");
+                return;
+            }
+            attackHero(run, enemy, rng, logs);
+            return;
+        }
+        const ai = enemy.ai || ENEMY_DEFS[enemy.type] && ENEMY_DEFS[enemy.type].ai || "slow";
+        if (ai === "slow") {
+            if (rng.int(1, 100) <= 50) {
+                return;
+            }
+            chaseHero(run, room, enemy, rng, 3);
+            return;
+        }
+        if (ai === "swarm") {
+            chaseHero(run, room, enemy, rng, 5);
+            return;
+        }
+        if (ai === "erratic") {
+            const dirs = FACINGS.slice();
+            for (let i = dirs.length - 1; i > 0; i -= 1) {
+                const j = rng.int(0, i);
+                const tmp = dirs[i];
+                dirs[i] = dirs[j];
+                dirs[j] = tmp;
+            }
+            for (let i = 0; i < dirs.length; i += 1) {
+                const vec = DIR[dirs[i]];
+                if (tryMoveStep(run, room, enemy, enemy.x + vec.x, enemy.y + vec.y)) {
+                    return;
+                }
+            }
+            chaseHero(run, room, enemy, rng, 5);
+            return;
+        }
+        if (ai === "relentless") {
+            chaseHero(run, room, enemy, rng, 6);
+            return;
+        }
+        if (ai === "patient") {
+            if (dist <= 2 || run.hp <= Math.ceil(run.maxHp * 0.5)) {
+                chaseHero(run, room, enemy, rng, 6);
+            }
+            return;
+        }
+        if (ai === "ogre") {
+            if (dist > 3) {
+                return;
+            }
+            chaseHero(run, room, enemy, rng, 4);
+            return;
+        }
+        if (ai === "phase") {
+            if (rng.int(1, 100) <= 40) {
+                var dirs2 = FACINGS.slice();
+                for (var di = dirs2.length - 1; di > 0; di -= 1) {
+                    var dj = rng.int(0, di);
+                    var tmp2 = dirs2[di];
+                    dirs2[di] = dirs2[dj];
+                    dirs2[dj] = tmp2;
+                }
+                for (var di2 = 0; di2 < dirs2.length; di2 += 1) {
+                    var vec2 = DIR[dirs2[di2]];
+                    var px = enemy.x + vec2.x;
+                    var py = enemy.y + vec2.y;
+                    if (px >= 0 && py >= 0 && px < MAP_SIZE && py < MAP_SIZE && !(run.x === px && run.y === py) && !enemyAt(room, px, py)) {
+                        var tile2 = getTile(room, px, py);
+                        if (tile2 !== "+" && tile2 !== "$") {
+                            enemy.x = px;
+                            enemy.y = py;
+                            return;
+                        }
+                    }
+                }
+            }
+            chaseHero(run, room, enemy, rng, 5);
+            return;
+        }
+        chaseHero(run, room, enemy, rng, 4);
     }
 
     function enemyTurn(run, rng, logs) {
@@ -674,17 +1173,38 @@
             }
             stepEnemy(run, room, foes[i], rng, logs);
         }
+        room.enemies.forEach(function (enemy) {
+            enemy.telegraph = enemy.hp > 0 && Math.abs(enemy.x - run.x) + Math.abs(enemy.y - run.y) === 1;
+            enemy.heavyTelegraph = !!enemy.heavyTelegraph;
+        });
     }
 
     function finishTurn(run, rng, logs, extra) {
         const result = extra || {};
         if (run.hp > 0 && !result.skipEnemies) {
             enemyTurn(run, rng, logs);
+        }        if (run.hp > 0 && run.poisonTurns > 0) {
+
+            run.hp = clamp(run.hp - 1, 0, run.maxHp);
+            run.poisonTurns -= 1;
+            logs.push("POISON 1");
+            if (run.poisonTurns <= 0) {
+                logs.push("POISON FADES");
+            }
         }
         if (run.hp <= 0) {
             run.hp = 0;
             logs.push("DEAD");
             result.died = true;
+        }
+        if (run.hp > 0 && !result.skipEnemies) {
+            const room = currentRoom(run);
+            if (room && room.enemies) {
+                room.enemies.forEach(function (enemy) {
+                    enemy.telegraph = enemy.hp > 0 && Math.abs(enemy.x - run.x) + Math.abs(enemy.y - run.y) === 1;
+            enemy.heavyTelegraph = !!enemy.heavyTelegraph;
+                });
+            }
         }
         commitRng(run, rng);
         result.logs = logs;
@@ -694,6 +1214,7 @@
 
     function enterRoom(run, nextId, viaDir) {
         run.roomId = nextId;
+        run.firstStrikeUsed = false;
         const inner = DOOR_INNER[viaDir];
         run.x = inner.x;
         run.y = inner.y;
@@ -743,27 +1264,44 @@
         const ny = run.y + vec.y;
         const foe = enemyAt(room, nx, ny);
         if (foe) {
-            const dmg = hitDamage(run.atk, foe.def, rng);
+            let bonus = 0;
+            if (run.classId === "scout" && !run.firstStrikeUsed) {
+                bonus = 1;
+                run.firstStrikeUsed = true;
+            }
+            const dmg = hitDamage(run.atk + bonus, foe.def, rng);
             foe.hp -= dmg;
-            logs.push("HIT " + foe.type.toUpperCase() + " " + dmg);
+            const foeName = enemyName(foe.type);
+            logs.push("HIT " + foeName + " " + dmg + (bonus ? " · FIRST STRIKE" : ""));
             if (foe.hp <= 0) {
                 foe.hp = 0;
-                logs.push(foe.type.toUpperCase() + " DOWN");
-                room.enemies = room.enemies.filter(function (e) {
-                    return e.hp > 0;
-                });
+                killEnemy(run, room, foe, logs);
             }
             return finishTurn(run, rng, logs);
         }
 
         const tile = getTile(room, nx, ny);
+        if (room.hazard === "blood" && tile === "." && room.enemies.length && rng.int(1, 100) <= 20) {
+            run.hp = clamp(run.hp - 1, 0, run.maxHp);
+            logs.push("BLOOD DRAIN 1");
+        }
+        if (room.hazard === "reinforced" && tile === "^") {
+            logs.push("IRON TRAP");
+        }
         if (tile === "S" || tile === "R") {
             return chooseRoomRoute(run, tile === "S" ? "safe" : "risk");
         }
         if (tile === "#") {
-            logs.push("BLOCKED");
-            commitRng(run, rng);
-            return { ok: false, blocked: true, logs: logs };
+            if (run.classId === "mage" || run.phaseStep <= 0) {
+                logs.push("BLOCKED");
+                commitRng(run, rng);
+                return { ok: false, blocked: true, logs: logs };
+            }
+            run.x = nx;
+            run.y = ny;
+            run.phaseStep -= 1;
+            logs.push("PHASE STEP");
+            return finishTurn(run, rng, logs);
         }
         if (tile === "$") {
             const opened = openChest(run, room, rng, logs);
@@ -795,6 +1333,11 @@
             return { ok: true, logs: logs, roomChanged: true, skipEnemies: true };
         }
         if (tile === ">") {
+            if (room.reward && room.reward.active && !room.reward.choice) {
+                logs.push("CHOOSE REWARD");
+                commitRng(run, rng);
+                return { ok: false, logs: logs, reward: true };
+            }
             const siteLimit = run.maxSiteFloor || MAX_FLOOR;
             const isHold = !run.siteId || run.siteId === "hold";
             if (run.floor === siteLimit && !isHold) {
@@ -812,22 +1355,50 @@
                 commitRng(run, rng);
                 return { ok: true, logs: logs, won: true, siteCleared: "hold", skipEnemies: true };
             }
+            if (isHold && wraithAlive(room)) {
+                logs.push("THE WRAITH BARS THE WAY");
+                commitRng(run, rng);
+                return { ok: false, logs: logs };
+            }
             run.floor += 1;
+            run.renown = (run.renown || 0) + 1;
             generateFloor(run, rng);
+            if (run.phaseStep > 0) logs.push("PHASE STEP READY");
+            if (run.lastStand > 0) logs.push("LAST STAND READY");
             logs.push("FLOOR " + run.floor);
             commitRng(run, rng);
             return { ok: true, logs: logs, floorChanged: true, roomChanged: true, skipEnemies: true };
         }
 
+        if (tile === "#" && run.phaseStep > 0) {
+            run.x = nx;
+            run.y = ny;
+            run.phaseStep -= 1;
+            logs.push("PHASE STEP");
+            return finishTurn(run, rng, logs);
+        }
         run.x = nx;
         run.y = ny;
         if (tile === "^") {
             const evaded = run.classId === "scout" && rng.int(1, 100) <= 50;
+            const trapDamage = room.hazard === "reinforced" ? 3 : 2;
             if (evaded) {
                 logs.push("TRAP EVADED");
             } else {
-                run.hp = clamp(run.hp - 2, 0, run.maxHp);
-                logs.push("TRAP 2");
+                run.hp = clamp(run.hp - trapDamage, 0, run.maxHp);
+                logs.push("TRAP " + trapDamage);
+            }
+            setTile(room, nx, ny, ".");
+        }
+        if (tile === "~") {
+            const evaded = run.classId === "scout" && rng.int(1, 100) <= 50;
+            if (evaded) {
+                logs.push("POISON EVADED");
+            } else if (hasCharm(run, "ward_charm")) {
+                logs.push("POISON WARDED");
+            } else {
+                    run.poisonTurns = 3;
+                logs.push("POISONED 3T");
             }
             setTile(room, nx, ny, ".");
         }
@@ -848,7 +1419,7 @@
                 return { ok: false, logs: logs };
             }
             run.guardTurns = 1;
-            logs.push("GUARD UP");
+            logs.push("GUARD UP · NEXT HIT HALF + COUNTER");
             commitRng(run, rng);
             return { ok: true, logs: logs, skipEnemies: true };
         }
@@ -857,9 +1428,10 @@
             const tx = run.x + vec.x;
             const ty = run.y + vec.y;
             const tile = getTile(room, tx, ty);
-            if (tile === "^") {
+            if (tile === "^" || tile === "~") {
                 setTile(room, tx, ty, ".");
                 logs.push("TRAP DISARMED");
+                logs.push("SAFE");
                 return finishTurn(run, rng, logs);
             }
             logs.push("NO TRAP");
@@ -869,9 +1441,10 @@
         if (run.classId === "mage") {
             const vec = DIR[run.facing];
             let enemy = null;
+            let hitDist = 0;
             for (let distance = 1; distance <= 3; distance += 1) {
                 enemy = enemyAt(room, run.x + vec.x * distance, run.y + vec.y * distance);
-                if (enemy) break;
+                if (enemy) { hitDist = distance; break; }
                 if (getTile(room, run.x + vec.x * distance, run.y + vec.y * distance) === "#") break;
             }
             if (!enemy) {
@@ -881,11 +1454,28 @@
             }
             const damage = Math.max(2, run.atk - enemy.def + 1);
             enemy.hp -= damage;
-            logs.push("CAST " + enemy.type.toUpperCase() + " " + damage);
+            const enemyNameStr = enemyName(enemy.type);
+            logs.push("CAST " + enemyNameStr + " " + damage + " · RANGE " + hitDist);
             if (enemy.hp <= 0) {
                 enemy.hp = 0;
-                logs.push(enemy.type.toUpperCase() + " DOWN");
-                room.enemies = room.enemies.filter(function (e) { return e.hp > 0; });
+                killEnemy(run, room, enemy, logs);
+                if (rng.int(1, 100) <= 30) {
+                    var secondEnemy = null;
+                    for (var d2 = hitDist + 1; d2 <= 3; d2 += 1) {
+                        secondEnemy = enemyAt(room, run.x + vec.x * d2, run.y + vec.y * d2);
+                        if (secondEnemy) break;
+                        if (getTile(room, run.x + vec.x * d2, run.y + vec.y * d2) === "#") break;
+                    }
+                    if (secondEnemy && secondEnemy.hp > 0) {
+                        var pierceDmg = Math.max(1, Math.floor(damage / 2));
+                        secondEnemy.hp -= pierceDmg;
+                        logs.push("PIERCE " + enemyName(secondEnemy.type) + " " + pierceDmg + " · ARCANE");
+                        if (secondEnemy.hp <= 0) {
+                            secondEnemy.hp = 0;
+                            killEnemy(run, room, secondEnemy, logs);
+                        }
+                    }
+                }
             }
             return finishTurn(run, rng, logs);
         }
@@ -906,26 +1496,92 @@
         const riskTile = room.choice.riskTile || { x: 4, y: 3 };
         setTile(room, safeTile.x, safeTile.y, ".");
         setTile(room, riskTile.x, riskTile.y, ".");
-        const logs = [];
-        if (route === "safe") {
+        const logs = [];        if (route === "safe") {
             room.enemies = [];
             logs.push("SAFE ROUTE");
         } else {
             run.gold += 10;
             logs.push("RISK ROUTE +10 GOLD");
             if (!room.enemies.length) {
-                room.enemies.push(makeEnemy(pickEnemyType(run.floor, rng, run.enemyPool), 4, 3, run.floor));
+                room.enemies.push(makeEnemy(pickEnemyType(run.floor, rng, run.enemyPool), 4, 3, run.floor, run.contract || 0));
+            }
+            if (run.floor >= 6 && room.hazard === "blood") {
+                room.enemies.forEach(function (enemy) {
+                    enemy.atk += 1;
+                });
+                logs.push("BLOOD FRENZY");
             }
         }
+
         room.choice.route = route;
         commitRng(run, rng);
         return { ok: true, logs: logs, roomChoice: true, skipEnemies: true };
+    }
+
+    function claimReward(run, choiceId) {
+        const logs = [];
+        const room = currentRoom(run);
+        if (!room || !room.reward || !room.reward.active || room.reward.choice) {
+            logs.push("NO REWARD");
+            return { ok: false, logs: logs };
+        }
+        const options = room.reward.options && room.reward.options.length ? room.reward.options : ["gold", "heal", "renown"];
+        const choice = options.indexOf(choiceId) !== -1 ? choiceId : options[0];
+        let amount = 0;
+        let renownGain = 0;
+        if (choice === "heal") {
+            amount = Math.ceil(run.maxHp * 0.5);
+            run.hp = Math.min(run.maxHp, run.hp + amount);
+        } else if (choice === "renown") {
+            amount = 3;
+            renownGain = 3;
+        } else {
+            amount = 15;
+            run.gold += amount;
+        }
+        if (room.reward.boon === "phaseStep") {
+            run.phaseStep = 1;
+        }
+        if (room.reward.boon === "lastStand") {
+            run.lastStand = 1;
+        }
+        room.reward.choice = choice;
+        room.reward.active = false;
+        const boonText = room.reward.boon === "phaseStep" ? " · PHASE STEP READY" : (room.reward.boon === "lastStand" ? " · LAST STAND READY" : "");
+        logs.push(choice.toUpperCase() + " REWARD +" + amount + boonText);
+        return { ok: true, logs: logs, reward: choice, renownGain: renownGain };
     }
 
     function waitTurn(run) {
         const logs = ["WAIT"];
         const rng = rngFromRun(run);
         return finishTurn(run, rng, logs);
+    }
+
+    function equipOnRun(run, index, logs) {
+        const item = run.pack[index];
+        const def = GEAR_DEFS[item];
+        if (!def) {
+            return false;
+        }
+        const gear = run.gear = normalizeGear(run.gear);
+        const previous = gear[def.slot];
+        gear[def.slot] = item;
+        const next = gearBonus(gear);
+        run.atk = Math.max(0, (run.atk || 0) + next.atk - (run.gearAtk || 0));
+        run.def = Math.max(0, (run.def || 0) + next.def - (run.gearDef || 0));
+        const maxHp = Math.max(1, (run.maxHp || 1) - (run.gearHp || 0) + next.hp);
+        run.hp = clamp(run.hp || 0, 0, maxHp);
+        run.maxHp = maxHp;
+        run.gearAtk = next.atk;
+        run.gearDef = next.def;
+        run.gearHp = next.hp;
+        run.pack.splice(index, 1);
+        if (previous) {
+            run.pack.push(previous);
+        }
+        logs.push("EQUIP " + ((ITEM_INFO[item] && ITEM_INFO[item].name) || item.toUpperCase()));
+        return true;
     }
 
     function useItem(run, index) {
@@ -940,12 +1596,13 @@
         if (item === "potion") {
             run.hp = clamp(run.hp + 6, 0, run.maxHp);
             logs.push("USED POTION");
-        } else if (item === "blade") {
-            run.atk += 1;
-            logs.push("USED BLADE");
-        } else if (item === "mail") {
-            run.def += 1;
-            logs.push("USED MAIL");
+        } else if (item === "greater_potion") {
+            run.hp = clamp(run.hp + 12, 0, run.maxHp);
+            logs.push("USED G.POTION");
+        } else if (GEAR_DEFS[item]) {
+            equipOnRun(run, index, logs);
+            commitRng(run, rng);
+            return { ok: true, logs: logs, equip: true };
         } else {
             logs.push("NO ITEM");
             commitRng(run, rng);
@@ -965,12 +1622,20 @@
         if (item === "potion") {
             hero.hp = clamp(hero.hp + 6, 0, hero.maxHp);
             logs.push("USED POTION");
-        } else if (item === "blade") {
-            hero.atk += 1;
-            logs.push("USED BLADE");
-        } else if (item === "mail") {
-            hero.def += 1;
-            logs.push("USED MAIL");
+        } else if (item === "greater_potion") {
+            hero.hp = clamp(hero.hp + 12, 0, hero.maxHp);
+            logs.push("USED G.POTION");
+        } else if (GEAR_DEFS[item]) {
+            const def = GEAR_DEFS[item];
+            const gear = hero.gear = normalizeGear(hero.gear);
+            const previous = gear[def.slot];
+            gear[def.slot] = item;
+            hero.pack.splice(index, 1);
+            if (previous) {
+                hero.pack.push(previous);
+            }
+            logs.push("EQUIP " + ((ITEM_INFO[item] && ITEM_INFO[item].name) || item.toUpperCase()));
+            return { ok: true, logs: logs, equip: true };
         } else {
             logs.push("NO ITEM");
             return { ok: false, logs: logs };
@@ -987,19 +1652,37 @@
         if (room.kind === "start" && run.floor === 1) {
             return "THE GATE CLOSES BEHIND YOU.";
         }
+        if (room.kind === "start" && FLOOR_THEMES[run.floor]) {
+            return FLOOR_THEMES[run.floor].line;
+        }
         if (room.kind === "stairs" && run.floor === MAX_FLOOR && ogreAlive(room)) {
             return "THE OGRE FILLS THE STAIRWELL.";
         }
+        if (room.kind === "stairs" && wraithAlive(room)) {
+            return "A WRAITH HAUNTS THE STAIRS.";
+        }
         if (room.kind === "stairs") {
-            return "STAIRS DOWN. COLD AIR RISES.";
+            if (run.floor <= 2) return "STAIRS DOWN. DAMP AIR RISES.";
+            if (run.floor <= 5) return "STAIRS DOWN. COLD AIR RISES.";
+            return "STAIRS DOWN. THE DARK BREATHES.";
         }
         if (room.enemies.length) {
+            const types = {};
+            room.enemies.forEach(function (e) {
+                types[e.type] = (types[e.type] || 0) + 1;
+            });
+            const names = Object.keys(types).map(function (t) {
+                return (ENEMY_DEFS[t] && ENEMY_DEFS[t].name) || t.toUpperCase();
+            });
+            if (room.enemies.length === 1) {
+                return names[0] + " IN THE DARK.";
+            }
             return "YOU ARE NOT ALONE.";
         }
         if (room.chest && !room.chest.open) {
             return "METAL LATCH IN THE DUST.";
         }
-        if (room.tiles.join("").indexOf("^") !== -1) {
+        if (room.tiles.join("").indexOf("^") !== -1 || room.tiles.join("").indexOf("~") !== -1) {
             return "THE FLOOR LOOKS WRONG.";
         }
         return "EMPTY STONE. KEEP MOVING.";
@@ -1008,7 +1691,8 @@
     function cannedDeathLine(run) {
         const cls = CLASSES[run.classId];
         const name = cls ? cls.name : String(run.classId).toUpperCase();
-        return "FL" + run.floor + " " + name + ". THE DUNGEON KEEPS THEM.";
+        const kills = run.kills || 0;
+        return "FL" + run.floor + " " + name + " · " + kills + " KILLS · " + (run.gold || 0) + " GOLD";
     }
 
     function cannedWinLine() {
@@ -1028,8 +1712,9 @@
                 facing: run.facing,
                 classId: run.classId
             },
+            floor: run.floor,
             enemies: room.enemies.map(function (e) {
-                return { type: e.type, x: e.x, y: e.y, hp: e.hp };
+                return { type: e.type, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, telegraph: !!e.telegraph, heavyTelegraph: !!e.heavyTelegraph, windup: !!e.windup };
             })
         };
     }
@@ -1059,6 +1744,14 @@
             atk: run.atk,
             def: run.def,
             pack: run.pack,
+            level: run.level || 1,
+            xp: run.xp || 0,
+            xpEarned: run.xpEarned || 0,
+            gear: run.gear ? normalizeGear(run.gear) : null,
+            gearAtk: run.gearAtk || 0,
+            gearDef: run.gearDef || 0,
+            gearHp: run.gearHp || 0,
+            contract: run.contract || 0,
             facing: run.facing,
             x: run.x,
             y: run.y,
@@ -1066,6 +1759,13 @@
             rooms: run.rooms,
             rngState: run.rngState,
             guardTurns: run.guardTurns || 0,
+            kills: run.kills || 0,
+            slainTypes: run.slainTypes ? cloneJson(run.slainTypes) : {},
+            poisonTurns: run.poisonTurns || 0,
+            firstStrikeUsed: !!run.firstStrikeUsed,
+            phaseStep: run.phaseStep || 0,
+            lastStand: run.lastStand || 0,
+            renown: run.renown || 0,
             roomChoice: run.roomChoice ? { active: !!run.roomChoice.active, safe: !!run.roomChoice.safe } : null,
             siteId: run.siteId || null,
             maxSiteFloor: run.maxSiteFloor || null,
@@ -1117,7 +1817,12 @@
                     hp: hp,
                     maxHp: Math.max(hp, Math.round(Number(e.maxHp)) || hp),
                     atk: Math.max(0, Math.round(Number(e.atk)) || ENEMY_DEFS[e.type].atk),
-                    def: Math.max(0, Math.round(Number(e.def)) || 0)
+                    def: Math.max(0, Math.round(Number(e.def)) || 0),
+                    gold: Math.max(0, Math.round(Number(e.gold)) || ENEMY_DEFS[e.type].gold || 0),
+                    ai: ENEMY_DEFS[e.type].ai || "slow",
+                    heavyCooldown: Math.max(0, Math.round(Number(e.heavyCooldown) || 0)),
+                    heavyTelegraph: !!e.heavyTelegraph,
+                    windup: Math.max(0, Math.min(1, Math.round(Number(e.windup) || 0)))
                 });
             });
         }
@@ -1141,7 +1846,10 @@
             doors: doors,
             enemies: enemies,
             chest: chest,
-            choice: raw.choice && typeof raw.choice === "object" ? { active: !!raw.choice.active, safe: !!raw.choice.safe, route: raw.choice.route === "safe" || raw.choice.route === "risk" ? raw.choice.route : null, safeTile: { x: 2, y: 3 }, riskTile: { x: 4, y: 3 } } : null
+            reward: raw.reward && typeof raw.reward === "object" ? { active: !!raw.reward.active, boss: typeof raw.reward.boss === "string" ? raw.reward.boss : "", choice: typeof raw.reward.choice === "string" ? raw.reward.choice : null, options: Array.isArray(raw.reward.options) ? raw.reward.options.filter(function (id) { return id === "gold" || id === "heal" || id === "renown"; }) : null, boon: typeof raw.reward.boon === "string" ? raw.reward.boon : null } : null,
+            choice: raw.choice && typeof raw.choice === "object" ? { active: !!raw.choice.active, safe: !!raw.choice.safe, route: raw.choice.route === "safe" || raw.choice.route === "risk" ? raw.choice.route : null, safeTile: { x: 2, y: 3 }, riskTile: { x: 4, y: 3 } } : null,
+            theme: typeof raw.theme === "string" ? raw.theme.slice(0, 32) : "DARK STONE",
+            hazard: raw.hazard === "reinforced" || raw.hazard === "blood" ? raw.hazard : null
         };
     }
 
@@ -1180,6 +1888,14 @@
             atk: Math.max(0, Math.round(Number(raw.atk) || 0)),
             def: Math.max(0, Math.round(Number(raw.def) || 0)),
             pack: pack,
+            level: clamp(Math.round(Number(raw.level) || 1), 1, LEVEL_CAP),
+            xp: Math.max(0, Math.round(Number(raw.xp) || 0)),
+            xpEarned: Math.max(0, Math.round(Number(raw.xpEarned) || 0)),
+            gear: normalizeGear(raw.gear),
+            gearAtk: Math.max(0, Math.round(Number(raw.gearAtk) || 0)),
+            gearDef: Math.max(0, Math.round(Number(raw.gearDef) || 0)),
+            gearHp: Math.max(0, Math.round(Number(raw.gearHp) || 0)),
+            contract: Math.max(0, Math.round(Number(raw.contract) || 0)),
             facing: facing,
             x: clamp(Math.round(Number(raw.x) || 3), 0, MAP_SIZE - 1),
             y: clamp(Math.round(Number(raw.y) || 3), 0, MAP_SIZE - 1),
@@ -1187,6 +1903,15 @@
             rooms: rooms,
             rngState: (Number(raw.rngState) || 0) >>> 0,
             guardTurns: raw.guardTurns > 0 ? 1 : 0,
+            kills: Math.max(0, Math.round(Number(raw.kills) || 0)),
+            slainTypes: raw.slainTypes && typeof raw.slainTypes === "object"
+                ? Object.keys(raw.slainTypes).filter(function (type) { return ENEMY_DEFS[type]; }).reduce(function (acc, type) { acc[type] = Math.max(1, Math.round(Number(raw.slainTypes[type]) || 0)); return acc; }, {})
+                : {},
+            poisonTurns: Math.max(0, Math.min(3, Math.round(Number(raw.poisonTurns) || 0))),
+            firstStrikeUsed: !!raw.firstStrikeUsed,
+            phaseStep: Math.max(0, Math.min(1, Math.round(Number(raw.phaseStep) || 0))),
+            lastStand: Math.max(0, Math.min(1, Math.round(Number(raw.lastStand) || 0))),
+            renown: Math.max(0, Math.round(Number(raw.renown) || 0)),
             roomChoice: raw.roomChoice && typeof raw.roomChoice === "object" ? { active: !!raw.roomChoice.active, safe: !!raw.roomChoice.safe } : null,
             siteId: typeof raw.siteId === "string" ? raw.siteId : null,
             maxSiteFloor: Number(raw.maxSiteFloor) > 0 ? Math.min(MAX_FLOOR, Math.round(Number(raw.maxSiteFloor))) : null,
@@ -1197,18 +1922,48 @@
         };
     }
 
-    function createHero(classId) {
+    function createHero(classId, meta) {
         const cls = CLASSES[classId] || CLASSES.knight;
+        const shrine = meta && meta.shrinePurchases || {};
+        const vigor = Math.max(0, Math.round(Number(shrine.vigor) || 0));
+        const edge = Math.max(0, Math.round(Number(shrine.edge) || 0));
+        const bulwark = Math.max(0, Math.round(Number(shrine.bulwark) || 0));
+        const bonusHp = vigor * 2;
+        const bonusAtk = edge;
+        const bonusDef = bulwark;
         return {
             classId: cls.id,
-            hp: cls.hp,
-            maxHp: cls.hp,
-            atk: cls.atk,
-            def: cls.def,
+            hp: cls.hp + bonusHp,
+            maxHp: cls.hp + bonusHp,
+            atk: cls.atk + bonusAtk,
+            def: cls.def + bonusDef,
             gold: cls.id === "scout" ? 15 : 0,
             pack: cls.id === "scout" ? ["potion"] : (cls.id === "mage" ? ["blade"] : []),
+            level: 1,
+            xp: 0,
+            gear: emptyGear(),
             lastInn: "ashford"
         };
+    }
+
+    function normalizeHero(hero) {
+        if (!hero) {
+            return null;
+        }
+        const cls = CLASSES[hero.classId] || CLASSES.knight;
+        hero.classId = cls.id;
+        hero.maxHp = Math.max(1, Math.round(Number(hero.maxHp) || cls.hp));
+        hero.hp = clamp(Math.round(Number(hero.hp) || hero.maxHp), 0, hero.maxHp);
+        hero.atk = Math.max(0, Math.round(Number(hero.atk) || 0));
+        hero.def = Math.max(0, Math.round(Number(hero.def) || 0));
+        hero.gold = Math.max(0, Math.round(Number(hero.gold) || 0));
+        hero.pack = Array.isArray(hero.pack) ? hero.pack.filter(function (id) { return ITEM_IDS.indexOf(id) !== -1; }).slice(0, PACK_MAX) : [];
+        hero.level = clamp(Math.round(Number(hero.level) || 1), 1, LEVEL_CAP);
+        hero.xp = Math.max(0, Math.round(Number(hero.xp) || 0));
+        hero.gear = normalizeGear(hero.gear);
+        grantXpToHero(hero, 0);
+        hero.hp = Math.min(hero.hp, hero.maxHp);
+        return hero;
     }
 
     function createEmptySave() {
@@ -1218,7 +1973,7 @@
             flags: {},
             location: { kind: "town", id: "ashford" },
             site: null,
-            meta: { deaths: 0, journal: [], bestFloor: 0, epitaphs: [] },
+            meta: { deaths: 0, journal: [], bestFloor: 0, renown: 0, epitaphs: [], kills: 0, contractsDone: 0, contractTiers: {}, bestiary: {} },
             run: null
         };
     }
@@ -1257,7 +2012,7 @@
             migrateV1(raw, save);
         } else {
             if (raw.hero && typeof raw.hero === "object" && CLASSES[raw.hero.classId]) {
-                const base = createHero(raw.hero.classId);
+                const base = createHero(raw.hero.classId, raw.meta);
                 save.hero = {
                     classId: base.classId,
                     hp: clamp(Math.round(Number(raw.hero.hp) || base.hp), 0, Math.max(1, Math.round(Number(raw.hero.maxHp) || base.maxHp))),
@@ -1266,6 +2021,9 @@
                     def: Math.max(0, Math.round(Number(raw.hero.def) || base.def)),
                     gold: Math.max(0, Math.round(Number(raw.hero.gold) || 0)),
                     pack: Array.isArray(raw.hero.pack) ? raw.hero.pack.filter(function (id) { return ITEM_IDS.indexOf(id) !== -1; }).slice(0, PACK_MAX) : [],
+                    level: Math.max(1, Math.round(Number(raw.hero.level) || 1)),
+                    xp: Math.max(0, Math.round(Number(raw.hero.xp) || 0)),
+                    gear: raw.hero.gear && typeof raw.hero.gear === "object" ? raw.hero.gear : null,
                     lastInn: typeof raw.hero.lastInn === "string" ? raw.hero.lastInn : "ashford"
                 };
             }
@@ -1282,12 +2040,42 @@
                 save.meta.deaths = Math.max(0, Math.round(Number(raw.meta.deaths) || 0));
                 save.meta.journal = Array.isArray(raw.meta.journal) ? raw.meta.journal.filter(function (line) { return typeof line === "string"; }).slice(0, 32).map(function (line) { return line.slice(0, 120); }) : [];
                 if (typeof raw.meta.bestFloor === "number") save.meta.bestFloor = clamp(Math.round(raw.meta.bestFloor), 0, MAX_FLOOR);
+                save.meta.renown = Math.max(0, Math.round(Number(raw.meta.renown) || 0));
+                if (raw.meta.shrinePurchases && typeof raw.meta.shrinePurchases === "object") {
+                    save.meta.shrinePurchases = {};
+                    Object.keys(raw.meta.shrinePurchases).forEach(function (key) {
+                        if (raw.meta.shrinePurchases[key]) {
+                            save.meta.shrinePurchases[key] = Math.round(Number(raw.meta.shrinePurchases[key]) || 0);
+                        }
+                    });
+                }
                 if (Array.isArray(raw.meta.epitaphs)) save.meta.epitaphs = raw.meta.epitaphs.filter(function (entry) { return entry && typeof entry.line === "string"; }).slice(0, 8);
+                save.meta.kills = Math.max(0, Math.round(Number(raw.meta.kills) || 0));
+                save.meta.contractsDone = Math.max(0, Math.round(Number(raw.meta.contractsDone) || 0));
+                if (raw.meta.contractTiers && typeof raw.meta.contractTiers === "object") {
+                    save.meta.contractTiers = {};
+                    Object.keys(raw.meta.contractTiers).forEach(function (key) {
+                        const value = Math.round(Number(raw.meta.contractTiers[key]) || 0);
+                        if (value > 0) {
+                            save.meta.contractTiers[key] = value;
+                        }
+                    });
+                }
+                if (raw.meta.bestiary && typeof raw.meta.bestiary === "object") {
+                    save.meta.bestiary = {};
+                    Object.keys(raw.meta.bestiary).forEach(function (key) {
+                        const count = Math.round(Number(raw.meta.bestiary[key]) || 0);
+                        if (count > 0) {
+                            save.meta.bestiary[key] = count;
+                        }
+                    });
+                }
             }
         }
         save.run = save.site;
+        normalizeHero(save.hero);
         if (!save.hero && save.site) {
-            save.hero = createHero(save.site.classId);
+            save.hero = createHero(save.site.classId, save.meta);
         }
         if (save.site && !save.location.id) save.location = { kind: "site", id: "hold" };
         return save;
@@ -1304,7 +2092,13 @@
                 deaths: save.meta.deaths || 0,
                 journal: (save.meta.journal || []).slice(0, 32),
                 bestFloor: save.meta.bestFloor || 0,
-                epitaphs: (save.meta.epitaphs || []).slice(0, 8)
+                renown: save.meta.renown || 0,
+                shrinePurchases: cloneJson(save.meta.shrinePurchases || {}),
+                epitaphs: (save.meta.epitaphs || []).slice(0, 8),
+                kills: save.meta.kills || 0,
+                contractsDone: save.meta.contractsDone || 0,
+                contractTiers: cloneJson(save.meta.contractTiers || {}),
+                bestiary: cloneJson(save.meta.bestiary || {})
             }
         };
     }
@@ -1313,20 +2107,29 @@
         const run = save.site || save.run;
         if (!run) return;
         const floor = clamp(run.floor, 1, MAX_FLOOR);
-        save.hero = save.hero || createHero(run.classId);
+        save.hero = save.hero || createHero(run.classId, save.meta);
+        syncHeroFromRun(save.hero, run);
         save.hero.hp = save.hero.maxHp;
-        const purse = Number(run.gold != null ? run.gold : save.hero.gold) || 0;
-        save.hero.gold = Math.floor(Math.max(0, purse) / 2);
+        save.hero.gold = Math.floor(Math.max(0, save.hero.gold) / 2);
         save.hero.lastInn = save.hero.lastInn || "ashford";
         save.flags = save.flags || {};
         save.meta = save.meta || { deaths: 0, journal: [] };
         save.meta.deaths = (save.meta.deaths || 0) + 1;
+        save.meta.kills = Math.max(0, (save.meta.kills || 0) + (run.kills || 0));
+        save.meta.bestiary = save.meta.bestiary || {};
+        if (run.slainTypes) {
+            Object.keys(run.slainTypes).forEach(function (type) {
+                save.meta.bestiary[type] = Math.max(save.meta.bestiary[type] || 0, run.slainTypes[type]);
+            });
+        }
         save.meta.journal = save.meta.journal || [];
         save.meta.journal.unshift(String(line || cannedDeathLine(run)).slice(0, 120));
         save.meta.journal = save.meta.journal.slice(0, 32);
         save.meta.bestFloor = Math.max(save.meta.bestFloor || 0, floor);
+        const renownGain = Math.floor((run.kills || 0) * 0.5) + floor;
+        save.meta.renown = Math.max(0, (save.meta.renown || 0) + renownGain);
         save.meta.epitaphs = save.meta.epitaphs || [];
-        save.meta.epitaphs.unshift({ floor: floor, classId: run.classId, line: String(line || cannedDeathLine(run)).slice(0, 80) });
+        save.meta.epitaphs.unshift({ floor: floor, classId: run.classId, level: run.level || 1, kills: run.kills || 0, gold: run.gold || 0, renown: renownGain, line: String(line || cannedDeathLine(run)).slice(0, 80) });
         save.meta.epitaphs = save.meta.epitaphs.slice(0, 8);
         save.site = null;
         save.run = null;
@@ -1342,12 +2145,8 @@
         }
         const run = save.site || save.run;
         if (run) {
-            save.hero = save.hero || createHero(run.classId);
-            save.hero.hp = run.hp;
-            save.hero.gold = run.gold;
-            save.hero.atk = run.atk;
-            save.hero.def = run.def;
-            save.hero.pack = run.pack.slice();
+            save.hero = save.hero || createHero(run.classId, save.meta);
+            syncHeroFromRun(save.hero, run);
             save.hero.lastInn = "keepgate";
         }
         save.site = null;
@@ -1360,10 +2159,28 @@
     global.PocketDungeon.CLASSES = CLASSES;
     global.PocketDungeon.CLASS_ORDER = CLASS_ORDER;
     global.PocketDungeon.ITEM_INFO = ITEM_INFO;
+    global.PocketDungeon.ENEMY_DEFS = ENEMY_DEFS;
     global.PocketDungeon.PACK_MAX = PACK_MAX;
     global.PocketDungeon.MAX_FLOOR = MAX_FLOOR;
     global.PocketDungeon.newSeed = newSeed;
+    global.PocketDungeon.createRng = createRng;
+    global.PocketDungeon.makeEnemy = makeEnemy;
+    global.PocketDungeon.LEVEL_CAP = LEVEL_CAP;
+    global.PocketDungeon.xpForNext = xpForNext;
+    global.PocketDungeon.levelGains = levelGains;
+    global.PocketDungeon.grantXp = grantXp;
+    global.PocketDungeon.grantXpToHero = grantXpToHero;
+    global.PocketDungeon.GEAR_SLOTS = GEAR_SLOTS;
+    global.PocketDungeon.GEAR_DEFS = GEAR_DEFS;
+    global.PocketDungeon.gearBonus = gearBonus;
+    global.PocketDungeon.normalizeGear = normalizeGear;
+    global.PocketDungeon.enemyXp = enemyXp;
+    global.PocketDungeon.killEnemy = killEnemy;
+    global.PocketDungeon.stripRunGear = stripRunGear;
+    global.PocketDungeon.syncHeroFromRun = syncHeroFromRun;
+    global.PocketDungeon.generateFloor = generateFloor;
     global.PocketDungeon.createRun = createRun;
+    global.PocketDungeon.createHero = createHero;
     global.PocketDungeon.createSiteRun = createSiteRun;
     global.PocketDungeon.cycleFacing = cycleFacing;
     global.PocketDungeon.faceTile = faceTile;
@@ -1371,6 +2188,8 @@
     global.PocketDungeon.tryAct = tryAct;
     global.PocketDungeon.waitTurn = waitTurn;
     global.PocketDungeon.chooseRoomRoute = chooseRoomRoute;
+    global.PocketDungeon.claimReward = claimReward;
+    global.PocketDungeon.hasCharm = hasCharm;
     global.PocketDungeon.useAbility = useAbility;
     global.PocketDungeon.useItem = useItem;
     global.PocketDungeon.useItemOnHero = useItemOnHero;

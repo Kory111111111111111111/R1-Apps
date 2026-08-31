@@ -135,7 +135,7 @@
         });
 
         // Test 6: Items
-        test("Items: Potion, Blade, Mail usage and clamping", function () {
+        test("Items: Potion heals, gear equips without consuming", function () {
             const run = PD.createRun("knight", 100);
             run.hp = 10;
             run.pack = ["potion", "blade", "mail"];
@@ -148,36 +148,53 @@
             const prevAtk = run.atk;
             const res2 = PD.useItem(run, 0);
             assert.ok(res2.ok);
+            assert.strictEqual(res2.equip, true);
             assert.strictEqual(run.atk, prevAtk + 1);
+            assert.strictEqual(run.gear.weapon, "blade");
+            assert.strictEqual(run.pack.length, 1);
 
             const prevDef = run.def;
             const res3 = PD.useItem(run, 0);
             assert.ok(res3.ok);
             assert.strictEqual(run.def, prevDef + 1);
+            assert.strictEqual(run.gear.armor, "mail");
             assert.strictEqual(run.pack.length, 0);
 
             const res4 = PD.useItem(run, 0);
             assert.strictEqual(res4.ok, false);
+
+            run.pack.push("iron_blade");
+            const res5 = PD.useItem(run, 0);
+            assert.ok(res5.ok);
+            assert.strictEqual(run.atk, prevAtk + 3);
+            assert.deepStrictEqual(run.pack, ["blade"]);
+            assert.strictEqual(run.gear.weapon, "iron_blade");
         });
 
         // Test 7: Save/Load
         test("Save / Load serialization and metadata persistence", function () {
             const save = PD.createEmptySave();
-            assert.strictEqual(save.v, 2);
+            assert.strictEqual(save.v, 3);
             assert.strictEqual(save.meta.bestFloor, 0);
             assert.deepStrictEqual(save.meta.epitaphs, []);
 
             save.run = PD.createRun("scout", 999);
             save.run.floor = 4;
             save.run.gold = 50;
+            save.run.level = 5;
+            save.run.xp = 3;
 
             const snap = PD.snapshot(save);
+            assert.strictEqual(snap.v, 3);
+            assert.strictEqual(snap.meta.bestFloor, 0);
             const restored = PD.applySnapshot(snap);
 
             assert.ok(restored.run);
             assert.strictEqual(restored.run.classId, "scout");
             assert.strictEqual(restored.run.floor, 4);
             assert.strictEqual(restored.run.gold, 50);
+            assert.strictEqual(restored.run.level, 5);
+            assert.strictEqual(restored.run.xp, 3);
             assert.strictEqual(restored.run.pack.length, 1);
         });
 
@@ -302,7 +319,7 @@
                 run: { classId: "nonexistent", floor: -5 }
             };
             const safe = PD.applySnapshot(corruptedRaw);
-            assert.strictEqual(safe.v, 2);
+            assert.strictEqual(safe.v, 3);
             assert.strictEqual(safe.meta.bestFloor, 0);
             assert.deepStrictEqual(safe.meta.epitaphs, []);
             assert.strictEqual(safe.run, null);

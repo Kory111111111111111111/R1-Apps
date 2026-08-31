@@ -65,6 +65,18 @@
             K: "#d4a017",
             Y: "#c8f090"
         },
+        rat: {
+            O: "#120c08",
+            C: "#6a5a48",
+            S: "#4a3a28",
+            H: "#8a7a68",
+            W: "#c4b4a0",
+            B: "#141414",
+            P: "#d4a017",
+            R: "#a33333",
+            K: "#d4a017",
+            Y: "#e8d48a"
+        },
         undead: {
             O: "#1a1612",
             C: "#d0c8b8",
@@ -76,6 +88,30 @@
             R: "#8a2020",
             K: "#d4a017",
             Y: "#e8d48a"
+        },
+        ghoul: {
+            O: "#0c0a14",
+            C: "#4a4a6a",
+            S: "#2a2a3a",
+            H: "#7a7aaa",
+            W: "#b0b0d0",
+            B: "#141414",
+            P: "#5a1a3a",
+            R: "#6a2040",
+            K: "#d4a017",
+            Y: "#c0a0e8"
+        },
+        wraith: {
+            O: "#080010",
+            C: "#2a2a4a",
+            S: "#1a1a2a",
+            H: "#6a6aaa",
+            W: "#9090d0",
+            B: "#0a0a14",
+            P: "#4a1a5a",
+            R: "#5a1a6a",
+            K: "#d4a017",
+            Y: "#a080e8"
         },
         boss: {
             O: "#140606",
@@ -235,6 +271,24 @@
             "SSSSSSSSSSSSSSSS",
             "SSSSSSSSSSSSSSSS",
             "SSSSSSSSSSSSSSSS"
+        ],
+        poison: [
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+                       "SSSSSSSSSSSSSSSS",
+            "SSSSPPPPPPSSSSSS",
+            "SSSPHHHHHHHPSSSS",
+            "SSPHHKKKKHHPSSS",
+            "SPHKKYYYYKKHPSS",
+            "SSPKYYWWYYKPSSS",
+            "SPHKKYYYYKKHPS",
+            "SSPHHKKKKHHPSSS",
+            "SSSPHHHHHHHPSSS",
+            "SSSSPPPPPPSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS"
         ]
     };
 
@@ -278,6 +332,44 @@
     ];
 
     const ENEMIES = {
+        rat: [
+            [
+                "................",
+                "................",
+                "................",
+                "....OOOO........",
+                "...OHHHHO.......",
+                "..OHHWBWHO......",
+                "..OHBBBBHO......",
+                "..OHHRRRHO......",
+                "...OHHHHO.......",
+                "....OOOO........",
+                "....O..O.........",
+                "....O..O.........",
+                "....O..O.........",
+                "....O..O.........",
+                ".....OO..........",
+                "................"
+            ],
+            [
+                "................",
+                "................",
+                "................",
+                "....OOOO........",
+                "...OHHHHO.......",
+                "..OHHWBWHO......",
+                "..OHBBBBHO......",
+                "..OHHRRRHO......",
+                "...OHHHHO.......",
+                "....OOOO........",
+                ".....O.O.........",
+                ".....O.O.........",
+                ".....O.O.........",
+                ".....O.O.........",
+                "......OO.........",
+                "................"
+            ]
+        ],
         slime: [
             [
                 "................",
@@ -392,6 +484,82 @@
                 "................"
             ]
         ],
+        ghoul: [
+            [
+                "................",
+                ".....OOOOO......",
+                "....OHHHHHO.....",
+                "....OHWBWHO.....",
+                "....OHBBBHO.....",
+                ".....ORRRO......",
+                "......OOO.......",
+                "....OCCCCCO.....",
+                "...OCC.P.CCO....",
+                "...OCC.P.CCO....",
+                "....OCCPCCO.....",
+                ".....OC.CO......",
+                ".....OC.CO......",
+                "....OOS.SOO.....",
+                "....OO...OO.....",
+                "................"
+            ],
+            [
+                "................",
+                ".....OOOOO......",
+                "....OHHHHHO.....",
+                "....OHWBWHO.....",
+                "....OHBBBHO.....",
+                ".....ORRRO......",
+                "......OOO.......",
+                "....OCCCCCO.....",
+                "...OCC.P.CCO....",
+                "....OCCPCCO.....",
+                ".....OC.CO......",
+                ".....OC.CO......",
+                "....OOC.COO.....",
+                "...OO.S.S.OO....",
+                "...OO.....OO....",
+                "................"
+            ]
+        ],
+        wraith: [
+            [
+                "................",
+                "......OOOO......",
+                ".....OHHHHO.....",
+                "....OHHHHHHO....",
+                "....OHWBWBO.....",
+                "....OHBWWBHO....",
+                ".....OHRRHO.....",
+                "......OOOO......",
+                "....OCCCCCO....",
+                "...OCC.P.CCO...",
+                "...OCC.P.CCO...",
+                "....OC.P.CO....",
+                "....OC...CO....",
+                "....OS...SO....",
+                "....OS...SO....",
+                "................"
+            ],
+            [
+                "................",
+                "......OOOO......",
+                ".....OHHHHO.....",
+                "....OHHHHHHO....",
+                "....OHWBWBO.....",
+                "....OHBWWBHO....",
+                ".....OHRRHO.....",
+                "......OOOO......",
+                "...OCCCCCO....",
+                "..OCC.P.CCO...",
+                "...OC.P.CO....",
+                "...OC...CO....",
+                "..OOS...SOO...",
+                "..OOS...SOO...",
+                "................",
+                "................"
+            ]
+        ],
         ogre: [
             [
                 "..OKKO....OKKO..",
@@ -451,6 +619,24 @@
             "................",
             "................"
         ],
+        greater_potion: [
+            "................",
+            "......OOOO......",
+            "......OHHO......",
+            "......OOOO......",
+            ".....OHHHHO.....",
+            "....OHPPRRHO....",
+            "...OHPPRRPRHO...",
+            "...OHRRPPRRRHO..",
+            "...OHRRRRPPRHO..",
+            "...OHPRRRRRRHO..",
+            "....OHRRPRRHO...",
+            ".....OHHHHO.....",
+            "......OOOO......",
+            "................",
+            "................",
+            "................"
+        ],
         blade: [
             "................",
             "...........WW...",
@@ -487,6 +673,24 @@
             "................",
             "................"
         ],
+        shield: [
+            "................",
+            ".....OOOOOO.....",
+            "....OHHHHHHO....",
+            "...OCCCCCCCCO...",
+            "..OCCCKKKKCCCO..",
+            ".OCCKYYYYYYKCCO.",
+            ".OCKYWWWWWWYKCO.",
+            ".OCKYWWWWWWYKCO.",
+            ".OCKYYYYYYYYKCO.",
+            ".OCCKKKKKKKKCCO.",
+            "..OCCCCCCCCCCO..",
+            "...OCCCCCCCCO...",
+            "....OOOOOOOO....",
+            ".....OOOOOO.....",
+            "................",
+            "................"
+        ],
         coin: [
             "................",
             "................",
@@ -504,13 +708,52 @@
             "................",
             "................",
             "................"
+        ],
+        drain_charm: [
+            "................",
+            "................",
+            ".....OOOOOO.....",
+            "....OKKKKKKO....",
+            "...OKKKKKKKKO...",
+            "...OKKKKKKKKO...",
+            "...OKKRRRRKKO...",
+            "...OKRWRRRRKO...",
+            "...OKRRRRRRKO...",
+            "...OKRRRRRRKO...",
+            "....OKRRRRKO....",
+            ".....OKRRKO.....",
+            "......OKKO......",
+            ".......OO.......",
+            "................",
+            "................"
+        ],
+        ward_charm: [
+            "................",
+            "................",
+            ".....OOOOOO.....",
+            "....OCWWWWCO....",
+            "...OCWWWWWWCO...",
+            "...OCWCCCCWCO...",
+            "...OCWCKKCWCO...",
+            "...OCWCKKCWCO...",
+            "...OCWCCCCWCO...",
+            "...OCWWWWWWCO...",
+            "....OCWWWWCO....",
+            ".....OCCCCCO....",
+            "......OOOOO.....",
+            "................",
+            "................",
+            "................"
         ]
     };
 
     const ENEMY_PALETTE = {
         slime: "beast",
+        rat: "rat",
         bat: "beast",
         skeleton: "undead",
+        ghoul: "ghoul",
+        wraith: "wraith",
         ogre: "boss"
     };
 
@@ -610,6 +853,7 @@
         if (ch === ">") return "stairs";
         if (ch === "$") return "chest";
         if (ch === "^") return "trap";
+        if (ch === "~") return "poison";
         if (ch === "S") return "safe";
         if (ch === "R") return "risk";
         return "floor";
@@ -657,11 +901,26 @@
             if (!enemy || enemy.hp <= 0) {
                 continue;
             }
+            if (enemy.telegraph) {
+                ctx.fillStyle = enemy.heavyTelegraph ? "#c44030" : (enemy.windup ? "#a080e8" : "#d4a017");
+                ctx.fillRect(enemy.x * TILE_PX + 12, enemy.y * TILE_PX + 1, enemy.heavyTelegraph ? 8 : (enemy.windup ? 6 : 4), 2);
+            }
             ctx.drawImage(
                 getBaked("enemy:" + enemy.type + ":" + anim),
                 enemy.x * TILE_PX,
                 enemy.y * TILE_PX
             );
+            var eMaxHp = enemy.maxHp || enemy.hp;
+            if (eMaxHp > 1 && enemy.hp < eMaxHp) {
+                var barW = TILE_PX - 6;
+                var barH = 2;
+                var barX = enemy.x * TILE_PX + 3;
+                var barY = enemy.y * TILE_PX + TILE_PX - 4;
+                ctx.fillStyle = "#3a0808";
+                ctx.fillRect(barX, barY, barW, barH);
+                ctx.fillStyle = "#c44030";
+                ctx.fillRect(barX, barY, Math.max(1, Math.round(barW * (enemy.hp / eMaxHp))), barH);
+            }
         }
 
         const hero = state && state.hero;
@@ -672,6 +931,13 @@
                 hero.y * TILE_PX
             );
             drawFacing(ctx, hero.x, hero.y, hero.facing);
+        }
+
+        var floorNum = state && state.floor ? Math.round(state.floor) : 1;
+        if (floorNum > 1) {
+            var alpha = Math.min(0.35, (floorNum - 1) * 0.05);
+            ctx.fillStyle = "rgba(8, 4, 12, " + alpha + ")";
+            ctx.fillRect(0, 0, TILE_PX * MAP_SIZE, TILE_PX * MAP_SIZE);
         }
     }
 
