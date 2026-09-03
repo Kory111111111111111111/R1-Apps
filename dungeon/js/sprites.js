@@ -124,6 +124,18 @@
             R: "#3a0808",
             K: "#f0c040",
             Y: "#f5d76e"
+        },
+        acolyte: {
+            O: "#120a1e",
+            C: "#3a2a5e",
+            S: "#241a3e",
+            H: "#7a5eaa",
+            W: "#a08ad0",
+            B: "#100818",
+            P: "#d4a017",
+            R: "#8a2038",
+            K: "#d4a017",
+            Y: "#6ec4e8"
         }
     };
 
@@ -198,6 +210,24 @@
             "SSSSSSSSSSSSSSSS",
             "SSSSSSSSSSSSSSSS",
             "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS"
+        ],
+        well: [
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSOOOOOOOOOOSSS",
+            "SSOCCCCCCCCCCOSS",
+            "SOCCCCCCCCCCCCOS",
+            "SOCSSSSSSSSSSCOS",
+            "SOCSCCCCCCCCSCOS",
+            "SOCSCYYYYYYSCCOS",
+            "SOCSCYSSSSYSCCOS",
+            "SOCSCYYYYYYSCCOS",
+            "SOCSCCCCCCCCSCOS",
+            "SOCSSSSSSSSSSCOS",
+            "SOCCCCCCCCCCCCOS",
+            "SSOCCCCCCCCCCOSS",
+            "SSSOOOOOOOOOOSSS",
             "SSSSSSSSSSSSSSSS"
         ],
         risk: [
@@ -597,6 +627,44 @@
                 "....OSS..SSO....",
                 "....OOO..OOO...."
             ]
+        ],
+        acolyte: [
+            [
+                "................",
+                ".....OOOOO......",
+                "....OHHHHHO.....",
+                "....OHWBWHO.....",
+                "....OHBBBHO.....",
+                ".....ORRRO......",
+                "......OOO.......",
+                "....OCCCCCO.....",
+                "...OCCYYYCCO....",
+                "...OCCYYYCCO....",
+                "....OCCCCCO.....",
+                ".....OC.CO......",
+                ".....OC.CO......",
+                "....OOS.SOO.....",
+                "....OO...OO.....",
+                "................"
+            ],
+            [
+                "................",
+                ".....OOOOO......",
+                "....OHHHHHO.....",
+                "....OHWBWHO.....",
+                "....OHBBBHO.....",
+                ".....ORRRO......",
+                "......OOO.......",
+                "....OCCCCCO.....",
+                "...OCCYWYCCO....",
+                "....OCCYCCO.....",
+                "....OCCCCCO.....",
+                ".....OC.CO......",
+                "....OOC.COO.....",
+                "...OO.S.S.OO....",
+                "...OO.....OO....",
+                "................"
+            ]
         ]
     };
 
@@ -754,7 +822,8 @@
         skeleton: "undead",
         ghoul: "ghoul",
         wraith: "wraith",
-        ogre: "boss"
+        ogre: "boss",
+        acolyte: "acolyte"
     };
 
     const baked = Object.create(null);
@@ -856,6 +925,7 @@
         if (ch === "~") return "poison";
         if (ch === "S") return "safe";
         if (ch === "R") return "risk";
+        if (ch === "!") return "well";
         return "floor";
     }
 
@@ -902,8 +972,8 @@
                 continue;
             }
             if (enemy.telegraph) {
-                ctx.fillStyle = enemy.heavyTelegraph ? "#c44030" : (enemy.windup ? "#a080e8" : "#d4a017");
-                ctx.fillRect(enemy.x * TILE_PX + 12, enemy.y * TILE_PX + 1, enemy.heavyTelegraph ? 8 : (enemy.windup ? 6 : 4), 2);
+                ctx.fillStyle = enemy.heavyTelegraph ? "#c44030" : (enemy.windup ? "#a080e8" : (enemy.castWindup ? "#6ec4e8" : "#d4a017"));
+                ctx.fillRect(enemy.x * TILE_PX + 12, enemy.y * TILE_PX + 1, enemy.heavyTelegraph ? 8 : (enemy.windup || enemy.castWindup ? 6 : 4), 2);
             }
             ctx.drawImage(
                 getBaked("enemy:" + enemy.type + ":" + anim),

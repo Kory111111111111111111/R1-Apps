@@ -1,7 +1,9 @@
 (function (global) {
     const MAP_SIZE = 7;
     const MAX_FLOOR = 8;
+    const MAX_ROOMS = 8;
     const PACK_MAX = 5;
+    const ROOM_TILE_CHARS = ".#+>$^~SR!";
     const SNAPSHOT_VERSION = 3;
     const LEVEL_CAP = 30;
     const BOSS_HEAVY_COOLDOWN = 2;
@@ -53,6 +55,7 @@
         bat: { hp: 3, atk: 3, def: 0, debut: 2, gold: 3, xp: 4, ai: "erratic", name: "BAT" },
         skeleton: { hp: 6, atk: 3, def: 0, debut: 4, gold: 5, xp: 8, ai: "relentless", name: "SKELETON" },
         ghoul: { hp: 8, atk: 4, def: 0, debut: 4, gold: 6, xp: 10, ai: "patient", name: "GHOUL" },
+        acolyte: { hp: 6, atk: 4, def: 0, debut: 5, gold: 7, xp: 12, ai: "caster", name: "ACOLYTE" },
         ogre: { hp: 20, atk: 5, def: 1, debut: 8, gold: 30, xp: 60, ai: "ogre", name: "OGRE" },
         wraith: { hp: 14, atk: 4, def: 0, debut: 4, gold: 20, xp: 25, ai: "phase", name: "WRAITH" }
     };
@@ -162,6 +165,52 @@
 
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    function optionalCoordinate(value) {
+        const number = Number(value);
+        return Number.isInteger(number) && number >= 0 && number < MAP_SIZE ? number : null;
+    }
+
+    function boundedInt(value, fallback, min, max) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+            return fallback;
+        }
+        return clamp(Math.round(number), min, max);
+    }
+
+    function tileIsWalkable(tiles, x, y) {
+        const ch = (tiles[y] || "")[x];
+        return ch === "." || ch === "^" || ch === "~" || ch === "S" || ch === "R" || ch === ">" || ch === "!";
+    }
+
+    function repairEnemyPlacements(tiles, enemies) {
+        const occupied = {};
+        enemies.forEach(function (enemy) {
+            const key = enemy.x + "," + enemy.y;
+            if (!tileIsWalkable(tiles, enemy.x, enemy.y) || occupied[key]) {
+                let moved = false;
+                for (let y = 1; y < MAP_SIZE - 1 && !moved; y += 1) {
+                    for (let x = 1; x < MAP_SIZE - 1 && !moved; x += 1) {
+                        if (tileIsWalkable(tiles, x, y) && !occupied[x + "," + y]) {
+                            enemy.x = x;
+                            enemy.y = y;
+                            moved = true;
+                        }
+                    }
+                }
+                if (!moved) {
+                    enemy.hp = 0;
+                }
+            }
+            if (enemy.hp > 0) {
+                occupied[enemy.x + "," + enemy.y] = true;
+            }
+        });
+        return enemies.filter(function (enemy) {
+            return enemy.hp > 0;
+        });
     }
 
     function xpForNext(level) {
@@ -309,21 +358,19 @@
         hero.def = base.def;
         hero.gold = Math.max(0, Math.round(Number(run.gold) || 0));
         hero.pack = Array.isArray(run.pack) ? run.pack.slice() : [];
-        // Return gear equipped during the run back to the pack so it is not silently
-        // lost, then drop any copy of the hero's persistent gear to avoid duplication.
-        if (run.gear) {
-            GEAR_SLOTS.forEach(function (slot) {
-                const id = run.gear[slot];
-                if (id && hero.pack.length < PACK_MAX) {
-                    hero.pack.push(id);
-                }
-            });
-        }
-        if (hero.gear) {
-            hero.pack = hero.pack.filter(function (id) {
-                return id !== hero.gear.weapon && id !== hero.gear.armor && id !== hero.gear.charm;
-            });
-        }
+        // Persistent equipment is already owned by the hero. Only return a changed
+        // run slot; replacement gear remains a real pack item after a retreat/death.
+        GEAR_SLOTS.forEach(function (slot) {
+            const persistentId = hero.gear && hero.gear[slot];
+            const runId = run.gear && run.gear[slot];
+            const persistentIndex = persistentId ? hero.pack.indexOf(persistentId) : -1;
+            if (persistentIndex !== -1) {
+                hero.pack.splice(persistentIndex, 1);
+            }
+            if (runId && runId !== persistentId && hero.pack.length < PACK_MAX) {
+                hero.pack.push(runId);
+            }
+        });
         hero.level = Math.max(1, Math.round(Number(run.level) || 1));
         hero.xp = Math.max(0, Math.round(Number(run.xp) || 0));
         return hero;
@@ -346,7 +393,7 @@
     }
 
     function currentRoom(run) {
-        return run.rooms[run.roomId];
+        return run && Array.isArray(run.rooms) ? run.rooms[run.roomId] : null;
     }
 
     function enemyAt(room, x, y) {
@@ -442,6 +489,9 @@
 
     function makeEnemy(type, x, y, floor, tier) {
         const def = ENEMY_DEFS[type];
+        if (!def) {
+            throw new Error("Unknown enemy: " + type);
+        }
         const bonus = Math.max(0, floor - def.debut);
         const t = Math.max(0, Math.round(Number(tier) || 0));
         const hp = def.hp + bonus + t;
@@ -458,8 +508,26 @@
             xpBonus: t,
             ai: def.ai || "slow",
             heavyCooldown: 0,
-            heavyTelegraph: false
+            heavyTelegraph: false,
+            heavyTargetX: null,
+            heavyTargetY: null,
+            huntTargetX: null,
+            huntTargetY: null,
+            castWindup: 0,
+            castTargetX: null,
+            castTargetY: null,
+            rewarded: false,
+            reinforced: false
         };
+    }
+
+    function reinforceEnemy(room, enemy) {
+        if (!room || !enemy || room.hazard !== "reinforced" || enemy.reinforced) {
+            return;
+        }
+        enemy.hp += 2;
+        enemy.maxHp += 2;
+        enemy.reinforced = true;
     }
 
     function enemyXp(enemy) {
@@ -475,9 +543,10 @@
     }
 
     function killEnemy(run, room, enemy, logs) {
-        if (!enemy || enemy.hp > 0) {
+        if (!enemy || enemy.hp > 0 || enemy.rewarded) {
             return false;
         }
+        enemy.rewarded = true;
         const name = enemyName(enemy.type);
         logs.push(name + " DOWN");
         const dropGold = enemy.gold || (ENEMY_DEFS[enemy.type] && ENEMY_DEFS[enemy.type].gold) || 0;
@@ -498,6 +567,7 @@
             logs.push("DRAIN +1");
         }
         if (room) {
+            enemy.rewarded = true;
             room.enemies = room.enemies.filter(function (e) {
                 return e.hp > 0;
             });
@@ -565,6 +635,13 @@
             reserved.push({ x: 4, y: 3 });
         }
 
+        if (opts.sanctum) {
+            room.kind = "sanctum";
+            room.sanctumUsed = false;
+            setTile(room, 3, 3, "!");
+            reserved.push({ x: 3, y: 3 });
+            return;
+        }
         if (opts.cleared) {
             return;
         }
@@ -595,16 +672,18 @@
         }
         if (opts.hazard === "reinforced") {
             room.hazard = "reinforced";
-            if (room.enemies.length) {
-                room.enemies.forEach(function (enemy) {
-                    enemy.hp += 2;
-                    enemy.maxHp += 2;
-                });
-            }
         }
         if (opts.hazard === "blood") {
             room.hazard = "blood";
         }
+        const reinforceEnemies = function () {
+            if (room.hazard !== "reinforced") {
+                return;
+            }
+            room.enemies.forEach(function (enemy) {
+                reinforceEnemy(room, enemy);
+            });
+        };
 
         const spots = interiorSpots(room).filter(function (p) {
             return getTile(room, p.x, p.y) === "." && !isReserved(p.x, p.y, room.doors, reserved);
@@ -626,6 +705,7 @@
             wight.atk += 1;
             wight.xpBonus = (wight.xpBonus || 0) + 6;
             room.enemies.push(wight);
+            reinforceEnemies();
             return;
         }
 
@@ -642,6 +722,7 @@
             room.enemies.push(makeEnemy(pickEnemyType(floor, rng, opts.enemyPool), spot.x, spot.y, floor, tier));
             reserved.push(spot);
         }
+        reinforceEnemies();
 
         if (rng.int(1, 100) <= 35) {
             const spot = takeSpot();
@@ -666,8 +747,8 @@
         const shortSite = Number(run.siteRoomCount) > 0;
         const extra = run.floor >= 7 ? 2 : 1;
         const roomCount = shortSite
-            ? clamp(run.siteRoomCount, 2, 8)
-            : clamp(5 + rng.int(0, 3), 5, 8);
+            ? clamp(run.siteRoomCount, 2, MAX_ROOMS)
+            : clamp(5 + rng.int(0, 3), 5, MAX_ROOMS);
         const branchCount = shortSite ? 0 : Math.min(extra, roomCount - 2);
         const backbone = roomCount - branchCount;
 
@@ -681,21 +762,28 @@
                 enemies: [],
                 chest: null,
                 choice: null,
+                sanctumUsed: false,
                 theme: (FLOOR_THEMES[run.floor] && FLOOR_THEMES[run.floor].name) || "DARK STONE"
             });
         }
 
         for (let i = 0; i < backbone - 1; i += 1) {
             if (!connectRooms(rooms, i, i + 1, rng)) {
-                console.warn("backbone connect failed", i, i + 1);
+                for (let retry = 0; retry < backbone && !connectRooms(rooms, i, i + 1, rng); retry += 1) {
+                    // The retry loop is intentionally deterministic after the seeded attempt.
+                }
             }
         }
 
         let nextId = backbone;
         for (let b = 0; b < branchCount; b += 1) {
-            const parent = rng.int(0, Math.max(0, backbone - 2));
-            if (!connectRooms(rooms, parent, nextId, rng)) {
-                connectRooms(rooms, 0, nextId, rng);
+            const preferred = rng.int(0, Math.max(0, backbone - 2));
+            let attached = connectRooms(rooms, preferred, nextId, rng);
+            for (let candidate = 0; !attached && candidate < backbone; candidate += 1) {
+                attached = connectRooms(rooms, candidate, nextId, rng);
+            }
+            if (!attached) {
+                console.warn("branch connect failed", nextId);
             }
             rooms[nextId].kind = "branch";
             nextId += 1;
@@ -707,20 +795,31 @@
         const siteLimit = run.maxSiteFloor || MAX_FLOOR;
         const isHoldSite = !run.siteId || run.siteId === "hold";
         const midBoss = isHoldSite && run.floor === 4;
+        if (isHoldSite && (run.floor === 3 || run.floor === 6) && run.floor < siteLimit) {
+            const sanctumRoom = rooms.find(function (room) {
+                return room.kind === "branch";
+            }) || rooms.find(function (room) {
+                return room.kind === "hall";
+            });
+            if (sanctumRoom) {
+                sanctumRoom.kind = "sanctum";
+            }
+        }
         rooms.forEach(function (room) {
             var pool = run.enemyPool;
             if (!pool && isHoldSite) {
                 if (run.floor <= 2) {
                     pool = ["slime", "rat", "bat"];
-                } else if (run.floor <= 5) {
+                } else if (run.floor <= 4) {
                     pool = ["slime", "bat", "skeleton", "ghoul"];
                 } else {
-                    pool = ["bat", "skeleton", "ghoul"];
+                    pool = ["bat", "skeleton", "ghoul", "acolyte"];
                 }
             }
             populateRoom(room, run.floor, rng, {
                 start: room.kind === "start",
                 stairs: room.kind === "stairs",
+                sanctum: room.kind === "sanctum",
                 boss: room.kind === "stairs" && run.floor === MAX_FLOOR && siteLimit === MAX_FLOOR,
                 midBoss: room.kind === "stairs" && midBoss,
                 named: room.kind === "stairs" && !!run.namedLast && run.floor === siteLimit,
@@ -728,7 +827,7 @@
                 tier: run.contract || 0,
                 enemyPool: pool,
                 choice: room.kind === "branch" && run.floor < siteLimit && !run.siteRoomCount,
-                hazard: run.floor >= 5 && room.kind !== "start" && room.kind !== "stairs"
+                hazard: run.floor >= 5 && room.kind !== "start" && room.kind !== "stairs" && room.kind !== "sanctum"
                     ? (run.floor >= 7 ? "blood" : "reinforced") : null
             });
         });
@@ -879,7 +978,7 @@
         if (tile === "$" || tile === "+" || tile === ">") {
             return isDest;
         }
-        return tile === "." || tile === "^" || tile === "~";
+        return tile === "." || tile === "^" || tile === "~" || tile === "S" || tile === "R" || tile === "!";
     }
 
     function pathTo(run, tx, ty) {
@@ -1036,47 +1135,127 @@
         if (enemy.windup > 0) {
             enemy.windup -= 1;
             enemy.telegraph = true;
-            logs.push((ENEMY_DEFS[enemy.type] || {}).name + " HUNTS");
             if (enemy.windup === 0) {
-                attackHero(run, enemy, rng, logs);
+                const targetHeld = run.x === enemy.huntTargetX && run.y === enemy.huntTargetY;
+                enemy.huntTargetX = null;
+                enemy.huntTargetY = null;
+                if (targetHeld) {
+                    logs.push((ENEMY_DEFS[enemy.type] || {}).name + " LUNGES");
+                    attackHero(run, enemy, rng, logs);
+                } else {
+                    logs.push((ENEMY_DEFS[enemy.type] || {}).name + " HUNT MISSES");
+                }
+            } else {
+                logs.push((ENEMY_DEFS[enemy.type] || {}).name + " HUNTS");
             }
             return;
         }
         if (enemy.heavyTelegraph) {
             const heavy = enemy.type === "ogre" ? 4 : 3;
-                const boonHeavy = run.lastStand > 0;
-            const guardedHeavy = boonHeavy ? 0 : (run.guardTurns > 0 ? Math.max(0, Math.floor(heavy / 2)) : heavy);
-            run.hp = clamp(run.hp - guardedHeavy, 0, run.maxHp);
+            const targetHeld = run.x === enemy.heavyTargetX && run.y === enemy.heavyTargetY;
+            enemy.heavyTelegraph = false;
+            enemy.heavyTargetX = null;
+            enemy.heavyTargetY = null;
+            enemy.heavyCooldown = BOSS_HEAVY_COOLDOWN;
+            if (!targetHeld) {
+                logs.push((ENEMY_DEFS[enemy.type] || {}).name + " SMASH MISSES");
+                return;
+            }
+            const guarded = run.guardTurns > 0;
+            const boonHeavy = run.lastStand > 0;
+            const damage = boonHeavy ? 0 : (guarded ? Math.max(0, Math.floor(heavy / 2)) : heavy);
+            run.hp = clamp(run.hp - damage, 0, run.maxHp);
             if (boonHeavy) {
                 run.lastStand -= 1;
                 logs.push("LAST STAND HOLDS");
             }
-            if (run.guardTurns > 0) run.guardTurns = 0;
-            logs.push((ENEMY_DEFS[enemy.type] || {}).name + " SMASH " + guardedHeavy);
-            enemy.heavyTelegraph = false;
-            enemy.heavyCooldown = BOSS_HEAVY_COOLDOWN;
+            if (guarded) {
+                run.guardTurns = 0;
+                logs.push("GUARD BREAKS");
+            }
+            logs.push((ENEMY_DEFS[enemy.type] || {}).name + " SMASH " + damage);
+            return;
+        }
+        if (enemy.castWindup > 0) {
+            enemy.castWindup -= 1;
+            enemy.telegraph = true;
+            if (enemy.castWindup === 0) {
+                const dxLine = Math.abs(run.x - enemy.x);
+                const dyLine = Math.abs(run.y - enemy.y);
+                const heldLine = (dxLine === 0 || dyLine === 0) && dxLine + dyLine <= 3;
+                enemy.castTargetX = null;
+                enemy.castTargetY = null;
+                if (heldLine) {
+                    const bolt = Math.max(1, (enemy.atk || 2) - 2);
+                    const guarded = run.guardTurns > 0;
+                    const damage = guarded ? Math.max(0, Math.floor(bolt / 2)) : bolt;
+                    run.hp = clamp(run.hp - damage, 0, run.maxHp);
+                    logs.push("ACOLYTE BOLT " + damage);
+                    if (guarded) {
+                        run.guardTurns = 0;
+                        logs.push("GUARD BREAKS");
+                    }
+                } else {
+                    logs.push("ACOLYTE BOLT MISSES");
+                }
+            } else {
+                logs.push("ACOLYTE CHANTS");
+            }
             return;
         }
         if (dist === 1) {
+            if (enemy.type === "acolyte") {
+                const awayX = enemy.x + Math.sign(enemy.x - run.x);
+                const awayY = enemy.y + Math.sign(enemy.y - run.y);
+                if (!tryMoveStep(run, room, enemy, awayX, awayY)) {
+                    for (let i = 0; i < FACINGS.length; i += 1) {
+                        const vec = DIR[FACINGS[i]];
+                        if (tryMoveStep(run, room, enemy, enemy.x + vec.x, enemy.y + vec.y)) {
+                            break;
+                        }
+                    }
+                }
+                logs.push("ACOLYTE BACKS AWAY");
+                return;
+            }
             if (enemy.type === "rat" && rng.int(1, 100) <= 25) {
                 const bite = Math.max(1, hitDamage(enemy.atk, run.def, rng) - 1);
-                run.hp = clamp(run.hp - bite, 0, run.maxHp);
+                const guardedBite = run.guardTurns > 0;
+                const biteDamage = guardedBite ? Math.max(0, Math.floor(bite / 2)) : bite;
+                run.hp = clamp(run.hp - biteDamage, 0, run.maxHp);
+                if (guardedBite) {
+                    run.guardTurns = 0;
+                    logs.push("GUARD BREAKS");
+                    if (run.classId === "knight" && enemy.hp > 0) {
+                        const counter = Math.max(1, Math.floor(run.atk / 2));
+                        enemy.hp -= counter;
+                        logs.push("COUNTER " + counter);
+                        if (enemy.hp <= 0) {
+                            enemy.hp = 0;
+                            killEnemy(run, room, enemy, logs);
+                        }
+                    }
+                }
                 if (hasCharm(run, "ward_charm")) {
-                    logs.push("RAT BITE " + bite + " · WARDED");
+                    logs.push("RAT BITE " + biteDamage + " · WARDED");
                 } else {
                     run.poisonTurns = Math.max(run.poisonTurns || 0, 2);
-                    logs.push("RAT BITE " + bite + " · DISEASE");
+                    logs.push("RAT BITE " + biteDamage + " · DISEASE");
                 }
                 return;
             }
             if (enemy.type === "ghoul" && enemy.windup <= 0 && rng.int(1, 100) <= 35) {
                 enemy.windup = 1;
+                enemy.huntTargetX = run.x;
+                enemy.huntTargetY = run.y;
                 enemy.telegraph = true;
                 logs.push("GHOUL HUNTS");
                 return;
             }
             if ((enemy.type === "ogre" || enemy.type === "wraith") && enemy.heavyCooldown <= 0) {
                 enemy.heavyTelegraph = true;
+                enemy.heavyTargetX = run.x;
+                enemy.heavyTargetY = run.y;
                 enemy.telegraph = true;
                 logs.push((ENEMY_DEFS[enemy.type] || {}).name + " RAISES A BLOW");
                 return;
@@ -1154,6 +1333,30 @@
                 }
             }
             chaseHero(run, room, enemy, rng, 5);
+            return;
+        }
+        if (ai === "caster") {
+            const dxLine = run.x === enemy.x || run.y === enemy.y;
+            const ranged = dxLine && dist >= 2 && dist <= 3;
+            let clearLine = true;
+            if (ranged) {
+                const mx = enemy.x + Math.sign(run.x - enemy.x);
+                const my = enemy.y + Math.sign(run.y - enemy.y);
+                const midTile = getTile(room, mx, my);
+                clearLine = midTile !== "#" && midTile !== "+" && midTile !== "$";
+            }
+            if (ranged && clearLine && rng.int(1, 100) <= 35) {
+                enemy.castWindup = 1;
+                enemy.castTargetX = run.x;
+                enemy.castTargetY = run.y;
+                enemy.telegraph = true;
+                logs.push("ACOLYTE CHANTS");
+                return;
+            }
+            if (dist > 4) {
+                return;
+            }
+            chaseHero(run, room, enemy, rng, 4);
             return;
         }
         chaseHero(run, room, enemy, rng, 4);
@@ -1259,7 +1462,11 @@
             logs.push("NO ROOM");
             return { ok: false, logs: logs };
         }
-        const vec = DIR[run.facing];
+        if (run.hp <= 0) {
+            logs.push("DEAD");
+            return { ok: false, died: true, logs: logs };
+        }
+        const vec = DIR[run.facing] || DIR.S;
         const nx = run.x + vec.x;
         const ny = run.y + vec.y;
         const foe = enemyAt(room, nx, ny);
@@ -1289,10 +1496,12 @@
             logs.push("IRON TRAP");
         }
         if (tile === "S" || tile === "R") {
+            run.x = nx;
+            run.y = ny;
             return chooseRoomRoute(run, tile === "S" ? "safe" : "risk");
         }
         if (tile === "#") {
-            if (run.classId === "mage" || run.phaseStep <= 0) {
+            if (run.classId === "mage" || run.phaseStep <= 0 || nx < 0 || ny < 0 || nx >= MAP_SIZE || ny >= MAP_SIZE) {
                 logs.push("BLOCKED");
                 commitRng(run, rng);
                 return { ok: false, blocked: true, logs: logs };
@@ -1301,6 +1510,18 @@
             run.y = ny;
             run.phaseStep -= 1;
             logs.push("PHASE STEP");
+            return finishTurn(run, rng, logs);
+        }
+        if (tile === "!") {
+            if (room.sanctumUsed) {
+                logs.push("WELL IS DRY");
+            } else {
+                const amount = Math.max(1, Math.ceil(run.maxHp * 0.35));
+                const healed = Math.min(amount, run.maxHp - run.hp);
+                run.hp = clamp(run.hp + amount, 0, run.maxHp);
+                room.sanctumUsed = true;
+                logs.push("SANCTUM REST +" + healed + " HP");
+            }
             return finishTurn(run, rng, logs);
         }
         if (tile === "$") {
@@ -1341,6 +1562,11 @@
             const siteLimit = run.maxSiteFloor || MAX_FLOOR;
             const isHold = !run.siteId || run.siteId === "hold";
             if (run.floor === siteLimit && !isHold) {
+                if (room.enemies.some(function (enemy) { return enemy.hp > 0; })) {
+                    logs.push("FOES BAR THE WAY");
+                    commitRng(run, rng);
+                    return { ok: false, logs: logs };
+                }
                 logs.push("SITE CLEAR");
                 commitRng(run, rng);
                 return { ok: true, logs: logs, siteCleared: run.siteId, skipEnemies: true };
@@ -1360,6 +1586,11 @@
                 commitRng(run, rng);
                 return { ok: false, logs: logs };
             }
+            if (room.enemies.some(function (enemy) { return enemy.hp > 0; })) {
+                logs.push("FOES BAR THE WAY");
+                commitRng(run, rng);
+                return { ok: false, logs: logs };
+            }
             run.floor += 1;
             run.renown = (run.renown || 0) + 1;
             generateFloor(run, rng);
@@ -1370,13 +1601,6 @@
             return { ok: true, logs: logs, floorChanged: true, roomChanged: true, skipEnemies: true };
         }
 
-        if (tile === "#" && run.phaseStep > 0) {
-            run.x = nx;
-            run.y = ny;
-            run.phaseStep -= 1;
-            logs.push("PHASE STEP");
-            return finishTurn(run, rng, logs);
-        }
         run.x = nx;
         run.y = ny;
         if (tile === "^") {
@@ -1503,7 +1727,9 @@
             run.gold += 10;
             logs.push("RISK ROUTE +10 GOLD");
             if (!room.enemies.length) {
-                room.enemies.push(makeEnemy(pickEnemyType(run.floor, rng, run.enemyPool), 4, 3, run.floor, run.contract || 0));
+                const riskEnemy = makeEnemy(pickEnemyType(run.floor, rng, run.enemyPool), 4, 3, run.floor, run.contract || 0);
+                room.enemies.push(riskEnemy);
+                reinforceEnemy(room, riskEnemy);
             }
             if (run.floor >= 6 && room.hazard === "blood") {
                 room.enemies.forEach(function (enemy) {
@@ -1658,6 +1884,9 @@
         if (room.kind === "stairs" && run.floor === MAX_FLOOR && ogreAlive(room)) {
             return "THE OGRE FILLS THE STAIRWELL.";
         }
+        if (room.kind === "sanctum") {
+            return room.sanctumUsed ? "THE WELL IS DRY." : "A COLD WELL WAITS IN THE STONE.";
+        }
         if (room.kind === "stairs" && wraithAlive(room)) {
             return "A WRAITH HAUNTS THE STAIRS.";
         }
@@ -1714,7 +1943,7 @@
             },
             floor: run.floor,
             enemies: room.enemies.map(function (e) {
-                return { type: e.type, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, telegraph: !!e.telegraph, heavyTelegraph: !!e.heavyTelegraph, windup: !!e.windup };
+                return { type: e.type, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, telegraph: !!e.telegraph, heavyTelegraph: !!e.heavyTelegraph, windup: !!e.windup, castWindup: !!e.castWindup };
             })
         };
     }
@@ -1822,7 +2051,16 @@
                     ai: ENEMY_DEFS[e.type].ai || "slow",
                     heavyCooldown: Math.max(0, Math.round(Number(e.heavyCooldown) || 0)),
                     heavyTelegraph: !!e.heavyTelegraph,
-                    windup: Math.max(0, Math.min(1, Math.round(Number(e.windup) || 0)))
+                    heavyTargetX: optionalCoordinate(e.heavyTargetX),
+                    heavyTargetY: optionalCoordinate(e.heavyTargetY),
+                    windup: Math.max(0, Math.min(1, Math.round(Number(e.windup) || 0))),
+                    huntTargetX: optionalCoordinate(e.huntTargetX),
+                    huntTargetY: optionalCoordinate(e.huntTargetY),
+                    castWindup: Math.max(0, Math.min(1, Math.round(Number(e.castWindup) || 0))),
+                    castTargetX: optionalCoordinate(e.castTargetX),
+                    castTargetY: optionalCoordinate(e.castTargetY),
+                    rewarded: !!e.rewarded,
+                    reinforced: !!e.reinforced
                 });
             });
         }
@@ -1838,15 +2076,16 @@
                 };
             }
         }
-        const kind = raw.kind === "start" || raw.kind === "stairs" || raw.kind === "branch" ? raw.kind : "hall";
+        const kind = raw.kind === "start" || raw.kind === "stairs" || raw.kind === "branch" || raw.kind === "sanctum" ? raw.kind : "hall";
         return {
             id: typeof raw.id === "number" ? raw.id : index,
             kind: kind,
             tiles: tiles,
             doors: doors,
-            enemies: enemies,
+            enemies: repairEnemyPlacements(tiles, enemies),
             chest: chest,
-            reward: raw.reward && typeof raw.reward === "object" ? { active: !!raw.reward.active, boss: typeof raw.reward.boss === "string" ? raw.reward.boss : "", choice: typeof raw.reward.choice === "string" ? raw.reward.choice : null, options: Array.isArray(raw.reward.options) ? raw.reward.options.filter(function (id) { return id === "gold" || id === "heal" || id === "renown"; }) : null, boon: typeof raw.reward.boon === "string" ? raw.reward.boon : null } : null,
+            sanctumUsed: !!raw.sanctumUsed,
+            reward: raw.reward && typeof raw.reward === "object" ? { active: !!raw.reward.active, boss: typeof raw.reward.boss === "string" ? raw.reward.boss : "", choice: typeof raw.reward.choice === "string" ? raw.reward.choice : null, preview: typeof raw.reward.preview === "string" ? raw.reward.preview : null, options: Array.isArray(raw.reward.options) ? raw.reward.options.filter(function (id) { return id === "gold" || id === "heal" || id === "renown"; }) : null, boon: typeof raw.reward.boon === "string" ? raw.reward.boon : null } : null,
             choice: raw.choice && typeof raw.choice === "object" ? { active: !!raw.choice.active, safe: !!raw.choice.safe, route: raw.choice.route === "safe" || raw.choice.route === "risk" ? raw.choice.route : null, safeTile: { x: 2, y: 3 }, riskTile: { x: 4, y: 3 } } : null,
             theme: typeof raw.theme === "string" ? raw.theme.slice(0, 32) : "DARK STONE",
             hazard: raw.hazard === "reinforced" || raw.hazard === "blood" ? raw.hazard : null
@@ -1873,6 +2112,29 @@
         }
         const roomId = clamp(Math.round(Number(raw.roomId) || 0), 0, rooms.length - 1);
         const facing = FACINGS.indexOf(raw.facing) !== -1 ? raw.facing : "S";
+        let heroX = clamp(Math.round(Number(raw.x) || 3), 0, MAP_SIZE - 1);
+        let heroY = clamp(Math.round(Number(raw.y) || 3), 0, MAP_SIZE - 1);
+        const heroRoom = rooms[roomId];
+        if (heroRoom && !tileIsWalkable(heroRoom.tiles, heroX, heroY)) {
+            heroX = 3;
+            heroY = 3;
+            if (!tileIsWalkable(heroRoom.tiles, heroX, heroY)) {
+                for (let sy = 1; sy < MAP_SIZE - 1; sy += 1) {
+                    let placed = false;
+                    for (let sx = 1; sx < MAP_SIZE - 1; sx += 1) {
+                        if (tileIsWalkable(heroRoom.tiles, sx, sy)) {
+                            heroX = sx;
+                            heroY = sy;
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if (placed) {
+                        break;
+                    }
+                }
+            }
+        }
         const pack = Array.isArray(raw.pack)
             ? raw.pack.filter(function (id) {
                 return ITEM_IDS.indexOf(id) !== -1;
@@ -1897,8 +2159,8 @@
             gearHp: Math.max(0, Math.round(Number(raw.gearHp) || 0)),
             contract: Math.max(0, Math.round(Number(raw.contract) || 0)),
             facing: facing,
-            x: clamp(Math.round(Number(raw.x) || 3), 0, MAP_SIZE - 1),
-            y: clamp(Math.round(Number(raw.y) || 3), 0, MAP_SIZE - 1),
+            x: heroX,
+            y: heroY,
             roomId: roomId,
             rooms: rooms,
             rngState: (Number(raw.rngState) || 0) >>> 0,

@@ -1518,6 +1518,268 @@ test("Death without persistent gear keeps run gear in the pack", function () {
     assert.strictEqual(save.hero.pack.indexOf("blade"), 0, "found gear should survive in pack");
 });
 
+test("Acolyte has defs and appears on late hold floors only", function () {
+    const def = PD.ENEMY_DEFS && PD.ENEMY_DEFS.acolyte;
+    assert.ok(def, "acolyte must be defined in ENEMY_DEFS");
+    assert.strictEqual(def.ai, "caster");
+    assert.ok(def.gold > 0);
+    assert.strictEqual(def.debut, 5);
+    const hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 10, pack: [], lastInn: "keepgate" };
+    let earlyAcolyte = false;
+    let lateAcolyte = false;
+    for (let i = 0; i < 40; i += 1) {
+        for (const f of [3, 4]) {
+            const run = PD.createSiteRun(hero, "hold", i * 3 + f);
+            run.floor = f;
+            const rng = PD.createRng(run.seed, 0);
+            PD.generateFloor(run, rng);
+            run.rooms.forEach(function (room) {
+                room.enemies.forEach(function (e) {
+                    if (e.type === "acolyte") { earlyAcolyte = true; }
+                });
+            });
+        }
+        const run = PD.createSiteRun(hero, "hold", i * 3 + 1);
+        run.floor = 6;
+        const rng = PD.createRng(run.seed, 0);
+        PD.generateFloor(run, rng);
+        run.rooms.forEach(function (room) {
+            room.enemies.forEach(function (e) {
+                if (e.type === "acolyte") { lateAcolyte = true; }
+            });
+        });
+    }
+    assert.strictEqual(earlyAcolyte, false, "acolyte must not spawn before floor 5");
+    assert.ok(lateAcolyte, "acolyte should appear on late hold floors across seeds");
+});
+
+test("Acolyte chants from range then bolts a held line but misses a broken line", function () {
+    let found = false;
+    let chantLogs = [];
+    for (let i = 0; i < 200 && !found; i += 1) {
+        const run = PD.createRun("knight", i * 13 + 1);
+        const room = PD.currentRoom(run);
+        const row = room.tiles[run.y].split("");
+        if (run.x + 2 >= row.length || row[run.x + 1] === "#" || row[run.x + 2] === "#") {
+            continue;
+        }
+        row[run.x + 1] = ".";
+        row[run.x + 2] = ".";
+        room.tiles[run.y] = row.join("");
+        room.enemies = [{ type: "acolyte", x: run.x + 2, y: run.y, hp: 6, maxHp: 6, atk: 4, def: 0, gold: 7, xp: 12, ai: "caster" }];
+        const res = PD.waitTurn(run);
+        if (res.logs.some(function (l) { return l.indexOf("ACOLYTE CHANTS") !== -1; })) {
+            found = true;
+            chantLogs = res.logs;
+        }
+    }
+    assert.ok(found, "acolyte should begin chanting when hero is 2 tiles away in line: " + chantLogs.join(","));
+    const run = PD.createRun("knight", 991);
+    const room = PD.currentRoom(run);
+    const ac = { type: "acolyte", x: run.x + 2, y: run.y, hp: 6, maxHp: 6, atk: 4, def: 0, gold: 7, xp: 12, ai: "caster" };
+    room.enemies = [ac];
+    const row = room.tiles[run.y].split("");
+    row[run.x + 1] = ".";
+    row[run.x + 2] = ".";
+    room.tiles[run.y] = row.join("");
+    ac.castWindup = 1;
+    ac.castTargetX = run.x;
+    ac.castTargetY = run.y;
+    ac.telegraph = true;
+    run.hp = run.maxHp;
+    const hpBefore = run.hp;
+    const res = PD.waitTurn(run);
+    assert.ok(res.logs.some(function (l) { return l.indexOf("ACOLYTE BOLT") !== -1; }), "held line should take bolt damage: " + res.logs.join(","));
+    assert.ok(run.hp < hpBefore, "held-line bolt must deal damage");
+    assert.strictEqual(ac.castWindup, 0, "bolt resolves the windup");
+});
+
+test("Acolyte bolt misses after the hero leaves the line", function () {
+    const run = PD.createRun("mage", 42);
+    const room = PD.currentRoom(run);
+    room.enemies = [{ type: "acolyte", x: 3, y: 3, hp: 6, maxHp: 6, atk: 4, def: 0, gold: 7, ai: "caster" }];
+    const ac = room.enemies[0];
+    run.x = 4;
+    run.y = 4;
+    ac.castWindup = 1;
+    ac.castTargetX = 3;
+    ac.castTargetY = 2;
+    ac.telegraph = true;
+    const hpBefore = run.hp;
+    const res = PD.waitTurn(run);
+    assert.ok(res.logs.some(function (l) { return l.indexOf("ACOLYTE BOLT MISSES") !== -1; }), "broken line should miss: " + res.logs.join(","));
+    assert.strictEqual(run.hp, hpBefore, "miss must not deal damage");
+});
+
+test("Delayed-attack targets and windups survive save/load round-trip", function () {
+    const save = PD.createEmptySave();
+    save.hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 10, pack: [], lastInn: "keepgate" };
+    save.site = PD.createSiteRun(save.hero, "hold", 88);
+    const room = PD.currentRoom(save.site);
+    room.enemies = [
+        { type: "ghoul", x: 1, y: 1, hp: 8, maxHp: 8, atk: 3, def: 0, gold: 5, windup: 1, huntTargetX: 3, huntTargetY: 2, telegraph: true },
+        { type: "ogre", x: 5, y: 1, hp: 22, maxHp: 22, atk: 5, def: 1, gold: 30, heavyTelegraph: true, heavyTargetX: 3, heavyTargetY: 4 },
+        { type: "acolyte", x: 1, y: 5, hp: 6, maxHp: 6, atk: 4, def: 0, gold: 7, castWindup: 1, castTargetX: 3, castTargetY: 5, telegraph: true }
+    ];
+    const restored = PD.applySnapshot(PD.snapshot(save));
+    const foes = restored.site.rooms[restored.site.roomId].enemies;
+    const ghoul = foes.find(function (e) { return e.type === "ghoul"; });
+    const ogre = foes.find(function (e) { return e.type === "ogre"; });
+    const acolyte = foes.find(function (e) { return e.type === "acolyte"; });
+    assert.strictEqual(ghoul.windup, 1);
+    assert.strictEqual(ghoul.huntTargetX, 3);
+    assert.strictEqual(ghoul.huntTargetY, 2);
+    assert.strictEqual(ogre.heavyTelegraph, true);
+    assert.strictEqual(ogre.heavyTargetX, 3);
+    assert.strictEqual(ogre.heavyTargetY, 4);
+    assert.strictEqual(acolyte.castWindup, 1);
+    assert.strictEqual(acolyte.castTargetX, 3);
+    assert.strictEqual(acolyte.castTargetY, 5);
+});
+
+test("Sanctum well heals once and sanctumUsed survives save/load", function () {
+    const run = PD.createRun("knight", 77);
+    const room = PD.currentRoom(run);
+    room.kind = "sanctum";
+    room.sanctumUsed = false;
+    run.hp = 5;
+    const row = room.tiles[run.y].split("");
+    row[run.x + 1] = "!";
+    room.tiles[run.y] = row.join("");
+    run.facing = "E";
+    const first = PD.tryAct(run);
+    assert.ok(first.logs.some(function (l) { return l.indexOf("SANCTUM REST") !== -1; }), "first well step should heal: " + first.logs.join(","));
+    assert.ok(run.hp > 5);
+    assert.strictEqual(room.sanctumUsed, true);
+    run.facing = "W";
+    PD.tryAct(run);
+    run.facing = "E";
+    const second = PD.tryAct(run);
+    assert.ok(!second.logs.some(function (l) { return l.indexOf("SANCTUM REST") !== -1; }), "used well must not heal twice");
+    const save = PD.createEmptySave();
+    save.hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 10, pack: [], lastInn: "keepgate" };
+    save.site = run;
+    const restored = PD.applySnapshot(PD.snapshot(save));
+    const restoredRoom = restored.site.rooms[restored.site.roomId];
+    assert.strictEqual(restoredRoom.kind, "sanctum");
+    assert.strictEqual(restoredRoom.sanctumUsed, true);
+});
+
+test("Malformed save entities are repaired onto legal walkable tiles", function () {
+    const save = PD.createEmptySave();
+    save.hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 10, pack: [], lastInn: "keepgate" };
+    save.site = PD.createSiteRun(save.hero, "hold", 31337);
+    const room = PD.currentRoom(save.site);
+    room.x = 3;
+    room.y = 3;
+    room.enemies = [
+        { type: "slime", x: 0, y: 0, hp: 4, maxHp: 4, atk: 2, def: 0, gold: 2 },
+        { type: "rat", x: 1, y: 1, hp: 5, maxHp: 5, atk: 2, def: 0, gold: 3 },
+        { type: "bat", x: 1, y: 1, hp: 3, maxHp: 3, atk: 2, def: 0, gold: 2 }
+    ];
+    const restored = PD.applySnapshot(PD.snapshot(save));
+    const foes = restored.site.rooms[restored.site.roomId].enemies;
+    assert.ok(foes.length >= 2, "surviving enemies must not be dropped");
+    foes.forEach(function (foe) {
+        const ch = restored.site.rooms[restored.site.roomId].tiles[foe.y] ? restored.site.rooms[restored.site.roomId].tiles[foe.y][foe.x] : "#";
+        assert.ok(ch !== "#", "enemy must not rest on a wall tile");
+    });
+    const keys = foes.map(function (foe) { return foe.x + "," + foe.y; });
+    assert.strictEqual(new Set(keys).size, keys.length, "enemies must not overlap each other");
+});
+
+test("Travel screen shows only reachable towns with HERE/OPEN/BARRED truth", function () {
+    const fresh = { flags: {}, location: { id: "ashford" }, meta: {} };
+    const rows = WORLD.travelOptions(fresh, "ashford");
+    assert.deepStrictEqual(rows.map(function (r) { return r.id; }), ["ashford", "saltmere"]);
+    assert.strictEqual(rows[0].here, true);
+    assert.strictEqual(rows[1].here, false);
+    assert.strictEqual(rows[1].open, false, "saltmere starts barred from ashford");
+    assert.strictEqual(rows[1].barred, true);
+
+    const opened = WORLD.travelOptions({ flags: { ashford_cellar_clear: 1 }, location: { id: "ashford" }, meta: {} }, "ashford");
+    assert.strictEqual(opened[1].open, true);
+    assert.strictEqual(opened[1].barred, false);
+
+    const fromSalt = WORLD.travelOptions({ flags: { ashford_cellar_clear: 1 }, location: { id: "saltmere" }, meta: {} }, "saltmere");
+    assert.deepStrictEqual(fromSalt.map(function (r) { return r.id; }), ["ashford", "saltmere", "keepgate"]);
+    assert.strictEqual(fromSalt[2].barred, true, "keepgate stays barred until the crypt clears");
+
+    const full = WORLD.travelOptions({ flags: { ashford_cellar_clear: 1, saltmere_crypt_clear: 1 }, location: { id: "saltmere" }, meta: {} }, "saltmere");
+    assert.strictEqual(full[2].open, true);
+});
+
+test("roadBlocker gives the exact next step for each gate", function () {
+    assert.strictEqual(WORLD.roadBlocker({ flags: {} }, "saltmere"), "TALK TO THE ELDER");
+    assert.strictEqual(WORLD.roadBlocker({ flags: { ashford_cellar_open: 1 } }, "saltmere"), "CLEAR THE CELLAR");
+    assert.strictEqual(WORLD.roadBlocker({ flags: { ashford_cellar_clear: 1 } }, "saltmere"), null);
+    assert.strictEqual(WORLD.roadBlocker({ flags: {} }, "keepgate"), "TALK TO THE HARBOR");
+    assert.strictEqual(WORLD.roadBlocker({ flags: { saltmere_crypt_open: 1 } }, "keepgate"), "CLEAR THE CRYPT");
+    assert.strictEqual(WORLD.roadBlocker({ flags: { saltmere_crypt_clear: 1 } }, "keepgate"), null);
+    assert.strictEqual(WORLD.roadBlocker({ flags: {} }, "ashford"), null, "home town is never gated");
+});
+
+test("townGoal narrates the one correct next step per town state", function () {
+    const state = { location: { id: "ashford" }, flags: {}, meta: {} };
+    assert.strictEqual(WORLD.townGoal(state), "SEE THE ELDER");
+    state.flags = { ashford_cellar_open: 1 };
+    assert.strictEqual(WORLD.townGoal(state), "CLEAR THE CELLAR");
+    state.flags = { ashford_cellar_clear: 1 };
+    assert.strictEqual(WORLD.townGoal(state), "ROAD EAST OPEN");
+
+    const salt = { location: { id: "saltmere" }, flags: { ashford_cellar_clear: 1 }, meta: {} };
+    assert.strictEqual(WORLD.townGoal(salt), "SEE THE HARBOR");
+    salt.flags = { ashford_cellar_clear: 1, saltmere_crypt_open: 1 };
+    assert.strictEqual(WORLD.townGoal(salt), "CLEAR THE CRYPT");
+    salt.flags = { ashford_cellar_clear: 1, saltmere_crypt_clear: 1 };
+    assert.strictEqual(WORLD.townGoal(salt), "ROAD EAST OPEN");
+
+    const kg = { location: { id: "keepgate" }, flags: { ashford_cellar_clear: 1, saltmere_crypt_clear: 1 }, meta: {} };
+    assert.strictEqual(WORLD.townGoal(kg), "SEE THE WARDEN");
+    kg.flags = { ashford_cellar_clear: 1, saltmere_crypt_clear: 1, keepgate_hold_open: 1 };
+    assert.strictEqual(WORLD.townGoal(kg), "ENTER THE HOLD");
+    kg.flags = { ashford_cellar_clear: 1, saltmere_crypt_clear: 1, keepgate_hold_clear: 1 };
+    assert.strictEqual(WORLD.townGoal(kg), "THE ROAD IS OPEN");
+});
+
+test("Road and site options carry their state on the town menu", function () {
+    const fresh = WORLD.townMenu({ location: { id: "ashford" }, meta: {} });
+    const roadFresh = fresh.find(function (o) { return o.id === "road"; });
+    assert.ok(roadFresh.label.indexOf("BARRED") !== -1, "locked road advertises itself");
+
+    const open = WORLD.townMenu({ location: { id: "ashford" }, flags: { ashford_cellar_open: 1 }, meta: {} });
+    const site = open.find(function (o) { return o.id === "site"; });
+    assert.ok(site && site.label.indexOf("CELLAR") !== -1, "site option names the dungeon");
+
+    const clear = WORLD.townMenu({ location: { id: "ashford" }, flags: { ashford_cellar_clear: 1 }, meta: {} });
+    const roadClear = clear.find(function (o) { return o.id === "road"; });
+    assert.ok(roadClear.label.indexOf("OPEN") !== -1, "cleared road advertises itself");
+});
+
+test("Every authored NPC carries a one-line role for the talk menu", function () {
+    ["elder", "miller", "harbor", "smuggler", "warden", "priest"].forEach(function (id) {
+        assert.ok(WORLD.npcRole(id), "NPC " + id + " needs a role");
+    });
+    assert.strictEqual(WORLD.npcRole("missing_npc"), "");
+});
+
+test("Dialogue item rewards are refused, never silently lost, at a full pack", function () {
+    const full = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 20, pack: ["potion", "blade", "mail", "potion", "potion"], lastInn: "ashford" };
+    const res = WORLD.advanceDialogue({ dialogueId: "miller", flags: {}, hero: full, meta: { journal: [] } }, "aid");
+    assert.strictEqual(res.ok, false);
+    assert.strictEqual(res.reason, "PACK FULL");
+    assert.ok(!res.state.flags.ashford_miller_aid, "un-taken choice must not set its flag");
+    assert.strictEqual(full.pack.length, 5, "no phantom item may appear");
+});
+
+test("Town pack option advertises how full the pack is", function () {
+    const menu = WORLD.townMenu({ location: { id: "ashford" }, hero: { pack: ["potion", "blade"] }, meta: {} });
+    const pack = menu.find(function (o) { return o.id === "pack"; });
+    assert.strictEqual(pack.label, "PACK 2/5");
+    const empty = WORLD.townMenu({ location: { id: "ashford" }, hero: { pack: [] }, meta: {} });
+    assert.strictEqual(empty.find(function (o) { return o.id === "pack"; }).label, "PACK");
+});
+
 console.log("\n=================================");
 console.log("Results: " + passed + " passed, " + failed + " failed");
 if (failed > 0) {

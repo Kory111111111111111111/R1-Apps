@@ -446,7 +446,9 @@
             return;
         }
         const canned = PD.cannedRoomLine(save.run);
-        pushLog([canned]);
+        if (logLines[logLines.length - 1] !== canned) {
+            pushLog([canned]);
+        }
         render();
         const run = save.run;
         pendingLlmKind = "room";
@@ -608,6 +610,9 @@
 
     function render() {
         drawMap();
+        if (hintEl) {
+            hintEl.classList.remove("two-line");
+        }
         const playing = mode === "play" || mode === "inventory";
         if (hudEl) {
             hudEl.hidden = !playing || !save.run;
@@ -652,8 +657,13 @@
             panelBodyEl.textContent = opts.map(function (opt, i) {
                 return (i === titleIndex ? "> " : "  ") + opt;
             }).join("\n");
-            panelMetaEl.textContent = (save.meta.renown ? "RENOWN " + save.meta.renown + " · " : "") + "THREE TOWNS · A BROKEN ROAD";
-            hintEl.textContent = "scroll: choose · side: select";
+            const titleLoc = save.location && save.location.id ? save.location.id : null;
+            const titleTown = titleLoc ? (WORLD.towns[titleLoc] ? WORLD.towns[titleLoc].name : String(titleLoc).toUpperCase()) : null;
+            const titleMeta = save.hero && titleLoc
+                ? (save.location.kind === "town" ? titleTown + " · " + (WORLD.townGoal(save) || "KEEP WALKING") : "INSIDE " + titleTown)
+                : "THREE TOWNS · A BROKEN ROAD";
+            panelMetaEl.textContent = (save.meta.renown ? "RENOWN " + save.meta.renown + " · " : "") + titleMeta;
+            hintEl.textContent = "click/enter: select · wheel/scroll: move";
         } else if (mode === "class") {
             const id = PD.CLASS_ORDER[classIndex];
             const cls = PD.CLASSES[id];
@@ -665,9 +675,14 @@
             const hpText = "HP " + (cls.hp + bHp) + (bHp ? "+" + bHp : "");
             const atkText = "ATK " + (cls.atk + bAtk) + (bAtk ? "+" + bAtk : "");
             const defText = "DEF " + (cls.def + bDef) + (bDef ? "+" + bDef : "");
-            panelBodyEl.textContent = hpText + "  " + atkText + "  " + defText + "\n" + (cls.abilityDesc || cls.desc || "");
-            panelMetaEl.textContent = "SIDE TO BEGIN";
-            hintEl.textContent = "scroll: class · side: go";
+            const startKit = {
+                knight: "STARTS: BARE-HANDED",
+                scout: "STARTS: 15G + POTION",
+                mage: "STARTS: BLADE (EQUIPPED)"
+            };
+            panelBodyEl.textContent = hpText + "  " + atkText + "  " + defText + "\n" + (cls.abilityDesc || cls.desc || "") + "\n" + (startKit[id] || "");
+            panelMetaEl.textContent = "CLICK TO BEGIN";
+            hintEl.textContent = "click/enter: begin · wheel: class";
         } else if (mode === "town") {
             refreshTownMenu();
             const town = WORLD.towns[save.location.id] || WORLD.towns.ashford;
@@ -675,48 +690,75 @@
             panelBodyEl.textContent = townMenu.map(function (option, i) {
                 return (i === townIndex ? "> " : "  ") + option.label;
             }).join("\n");
-            panelMetaEl.textContent = shopNote || ("HP " + save.hero.hp + "/" + save.hero.maxHp + "  G" + save.hero.gold);
-            hintEl.textContent = "scroll: choose · side: select · hold: pack";
+            const goal = WORLD.townGoal(save);
+            const heroStats = "HP " + save.hero.hp + "/" + save.hero.maxHp + " G" + save.hero.gold;
+            panelMetaEl.textContent = shopNote || (goal ? heroStats + " · " + goal : heroStats);
+            hintEl.textContent = "click/enter: go · wheel/scroll: move · esc: pack";
         } else if (mode === "travel") {
             const from = save.location.id;
+            const rows = WORLD.travelOptions(save, from);
+            if (!rows.length) {
+                mode = "town";
+                render();
+                return;
+            }
+            townIndex = ((townIndex % rows.length) + rows.length) % rows.length;
+            const sel = rows[townIndex];
             panelTitleEl.textContent = "ROAD";
-            panelBodyEl.textContent = WORLD.TRAVEL_ORDER.map(function (id, i) {
-                return (i === townIndex ? "> " : "  ") + WORLD.travelLabel(save, from, id);
+            panelBodyEl.textContent = rows.map(function (row, i) {
+                const mark = i === townIndex ? "> " : "  ";
+                const tag = row.here ? " [HERE]" : (row.barred ? " [BARRED]" : "");
+                return mark + row.name + tag;
             }).join("\n");
-            panelMetaEl.textContent = "SIDE TO TRAVEL · HOLD TO RETURN";
-            hintEl.textContent = "scroll: destination · side: travel";
+            if (sel.here) {
+                panelMetaEl.textContent = "YOU ARE HERE · ESC TO LEAVE";
+                hintEl.textContent = "esc: back · wheel: towns";
+            } else if (sel.barred) {
+                panelMetaEl.textContent = "BARRED · " + (WORLD.roadBlocker(save, sel.id) || "TALK TO THE TOWN");
+                hintEl.textContent = "road blocked · esc: back";
+            } else {
+                panelMetaEl.textContent = "ROAD OPEN · ENTER TO TRAVEL";
+                hintEl.textContent = "click/enter: travel · esc: back";
+            }
         } else if (mode === "shop") {
             const stock = WORLD.shops[save.location.id] || [];
             panelTitleEl.textContent = "SHOP";
             if (!stock.length) {
                 panelBodyEl.textContent = "CLOSED";
+                panelMetaEl.textContent = shopNote || "NOTHING FOR SALE";
+                hintEl.textContent = "esc: back";
             } else {
                 panelBodyEl.textContent = stock.map(function (item, i) {
                     return (i === townIndex ? "> " : "  ") + item.name + " G" + item.price;
                 }).join("\n");
+                const selItem = stock[townIndex];
+                const selInfo = selItem && PD.ITEM_INFO && PD.ITEM_INFO[selItem.id];
+                panelMetaEl.textContent = shopNote || ("G" + save.hero.gold + " · " + ((selInfo && selInfo.effect) || "") + " · click: buy");
+                hintEl.textContent = "wheel: item · click: buy · esc: back";
             }
-            panelMetaEl.textContent = shopNote || ("G" + save.hero.gold + " · SIDE TO BUY · HOLD TO RETURN");
-            hintEl.textContent = "scroll: item · side: buy";
         } else if (mode === "shrine") {
             const upgrades = WORLD.shrineUpgrades || [];
             panelTitleEl.textContent = "SHRINE";
             const renown = (save.meta && save.meta.renown) || 0;
             if (!upgrades.length) {
                 panelBodyEl.textContent = "EMPTY";
+                panelMetaEl.textContent = "NO POWERS LEFT · ESC TO LEAVE";
+                hintEl.textContent = "esc: back";
             } else {
                 panelBodyEl.textContent = upgrades.map(function (item, i) {
                     return (i === townIndex ? "> " : "  ") + item.name + " " + item.cost + "R";
                 }).join("\n");
+                const selUp = upgrades[townIndex];
+                panelMetaEl.textContent = shopNote || ("R" + renown + " · " + (selUp ? selUp.name : "") + " · click: buy");
+                hintEl.textContent = "wheel: power · click: buy · esc: back";
             }
-            panelMetaEl.textContent = shopNote || ("RENOWN " + renown + " · SIDE TO BUY · HOLD TO RETURN");
-            hintEl.textContent = "scroll: power · side: buy";
         } else if (mode === "hero") {
             const hero = save.hero;
             const cls = hero && PD.CLASSES[hero.classId];
             panelTitleEl.textContent = hero ? ((cls && cls.name) || "HERO") : "HERO";
             if (!hero) {
                 panelBodyEl.textContent = "NO HERO YET.";
-                panelMetaEl.textContent = "SIDE TO RETURN";
+                panelMetaEl.textContent = "CLICK TO RETURN";
             } else {
                 const gear = PD.gearBonus ? PD.gearBonus(hero.gear) : { atk: 0, def: 0, hp: 0 };
                 const level = hero.level || 1;
@@ -727,7 +769,7 @@
                         "HP " + hero.hp + "/" + (hero.maxHp + gear.hp) +
                         "  ATK " + (hero.atk + gear.atk) + "  DEF " + (hero.def + gear.def) + "\n" +
                         "GOLD " + hero.gold + " · RENOWN " + (save.meta.renown || 0);
-                    panelMetaEl.textContent = "PAGE 1/3 · SIDE TO EXIT";
+                    panelMetaEl.textContent = "PAGE 1/3 · CLICK TO EXIT";
                 } else if (heroPageIndex === 1) {
                     const gearItem = function (id) {
                         return id && PD.ITEM_INFO && PD.ITEM_INFO[id] ? PD.ITEM_INFO[id].name : null;
@@ -741,7 +783,7 @@
                         slotLine("ARMOR", g.armor) + "\n" +
                         slotLine("CHARM", g.charm) + "\n" +
                         "GEAR BONUS +" + gear.atk + "A +" + gear.def + "D +" + gear.hp + "HP";
-                    panelMetaEl.textContent = "PAGE 2/3 · SIDE TO EXIT";
+                    panelMetaEl.textContent = "PAGE 2/3 · CLICK TO EXIT";
                 } else {
                     const siteNames = Object.keys(save.meta.contractTiers || {}).map(function (id) {
                         return id.toUpperCase() + " T" + save.meta.contractTiers[id];
@@ -750,12 +792,12 @@
                         "BEST FL" + (save.meta.bestFloor || 0) + " · KILLS " + (save.meta.kills || 0) + "\n" +
                         "DEATHS " + (save.meta.deaths || 0) + " · CONTRACTS " + (save.meta.contractsDone || 0) + "\n" +
                         (siteNames.length ? siteNames.join(" · ") : "NO CONTRACTS YET");
-                    panelMetaEl.textContent = "PAGE 3/3 · SIDE TO EXIT";
+                    panelMetaEl.textContent = "PAGE 3/3 · CLICK TO EXIT";
                 }
             }
-            hintEl.textContent = "scroll: page · side: back";
+            hintEl.textContent = "wheel: page · click: back";
         } else if (mode === "bestiary") {
-            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "wraith", "ogre"];
+            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "acolyte", "wraith", "ogre"];
             const known = save.meta.bestiary || {};
             const rows = order.filter(function (type) {
                 return known[type];
@@ -774,23 +816,26 @@
                 }
                 panelBodyEl.textContent = lines.slice(0, 7).join("\n");
             }
-            panelMetaEl.textContent = Object.keys(known).length + "/7 KNOWN · SIDE TO RETURN";
-            hintEl.textContent = "scroll: foe · side: back";
+            panelMetaEl.textContent = Object.keys(known).length + "/8 KNOWN · CLICK TO RETURN";
+            hintEl.textContent = "wheel: foe · click: back";
         } else if (mode === "help") {
             panelTitleEl.textContent = "HOW TO PLAY";
             panelBodyEl.textContent =
-                "MOVE: tap a tile · or scroll: face + side: step\n" +
-                "WAIT: side · FIGHT: walk into a foe\n" +
-                "ABILITY: Q (GUARD/DISARM/SPELL)\n" +
-                "PACK: hold · RETREAT from the pack\n" +
-                "SIDE CLICK selects · HOLD returns";
-            panelMetaEl.textContent = "DEATH HALVES GOLD · KEEPS LEVELS";
-            hintEl.textContent = "side: back";
+                "CLICK / ENTER = SELECT\n" +
+                "WHEEL / ARROWS / W S = MOVE\n" +
+                "ESC / I = PACK OR BACK\n" +
+                "Q = ABILITY · SPACE = WAIT\n" +
+                "CLICK A TILE = WALK / FIGHT\n" +
+                "ROADS OPEN EAST WHEN SITES FALL\n" +
+                "TALK FIRST · MENUS SHOW THE GOAL\n" +
+                "DEATH HALVES GOLD · LEVELS KEEP";
+            panelMetaEl.textContent = "TALK · SHOP · REST · SHRINE · PACK · JOURNAL";
+            hintEl.textContent = "click/esc: back";
         } else if (mode === "journal") {
             panelTitleEl.textContent = "JOURNAL";
             panelBodyEl.textContent = (save.meta.journal || []).slice(0, 4).join("\n") || "NO ENTRIES YET.";
-            panelMetaEl.textContent = "SIDE TO RETURN";
-            hintEl.textContent = "side: back";
+            panelMetaEl.textContent = "CLICK TO RETURN";
+            hintEl.textContent = "click/esc: back";
         } else if (mode === "talk") {
             if (talkPhase === "npcs") {
                 const npcs = (WORLD.towns[save.location.id] || WORLD.towns.ashford).npcs;
@@ -798,8 +843,9 @@
                 panelBodyEl.textContent = npcs.map(function (id, i) {
                     return (i === townIndex ? "> " : "  ") + WORLD.npcName(id);
                 }).join("\n");
-                panelMetaEl.textContent = "SIDE TO SPEAK · HOLD TO RETURN";
-                hintEl.textContent = "scroll: person · side: talk";
+                const npcSel = npcs[townIndex];
+                panelMetaEl.textContent = (npcSel ? (WORLD.npcRole(npcSel) || WORLD.npcName(npcSel)) : "") + " · CLICK TO SPEAK";
+                hintEl.textContent = "wheel: person · click: talk · esc: back";
             } else {
                 const node = WORLD.getDialogue(talkNpc, save.flags);
                 panelTitleEl.textContent = WORLD.npcName(talkNpc);
@@ -808,8 +854,8 @@
                 panelBodyEl.textContent = lines.join("\n") + "\n" + choices.map(function (choice, i) {
                     return (i === townIndex ? "> " : "  ") + choice.label;
                 }).join("\n");
-                panelMetaEl.textContent = "SIDE TO CHOOSE · HOLD TO RETURN";
-                hintEl.textContent = "scroll: choice · side: confirm";
+                panelMetaEl.textContent = "CLICK A CHOICE · ESC: BACK";
+                hintEl.textContent = "wheel: choice · click: answer · esc: back";
             }
         } else if (mode === "wake") {
             const inn = WORLD.towns[save.hero && save.hero.lastInn] || WORLD.towns.ashford;
@@ -820,18 +866,18 @@
             const renownGain = entry && entry.renown != null ? entry.renown : 0;
             const floor = entry && entry.floor != null ? entry.floor : 0;
             panelBodyEl.textContent = summary + "\nFL" + floor + " · " + kills + " KILLS · +" + renownGain + " RENOWN";
-            panelMetaEl.textContent = "GOLD HALVED · BEST FL" + (save.meta.bestFloor || 0) + " · SIDE TO RISE";
-            hintEl.textContent = "side: town";
+            panelMetaEl.textContent = "GOLD HALVED · BEST FL" + (save.meta.bestFloor || 0) + " · CLICK TO RISE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "clear") {
             panelTitleEl.textContent = "SITE CLEAR";
             panelBodyEl.textContent = clearLine || "THE ROAD CHANGES.";
-            panelMetaEl.textContent = "SIDE TO RETURN";
-            hintEl.textContent = "side: town";
+            panelMetaEl.textContent = "CLICK TO RETURN TO TOWN";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "finale") {
             panelTitleEl.textContent = "THE ROAD OPENS";
             panelBodyEl.textContent = winLine || WORLD.endings.hold;
-            panelMetaEl.textContent = "SIDE TO KEEPGATE";
-            hintEl.textContent = "side: town";
+            panelMetaEl.textContent = "CLICK TO KEEPGATE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "graveyard") {
             const count = save.meta.epitaphs.length;
             if (!count) {
@@ -848,8 +894,8 @@
             const renown = entry.renown != null ? entry.renown : 0;
             const level = entry.level != null ? "L" + entry.level + " " : "";
             panelBodyEl.textContent = level + "FL" + entry.floor + " " + clsName + " · " + kills + "K · " + gold + "G · " + renown + "R\n\n\"" + entry.line + "\"";
-            panelMetaEl.textContent = "SIDE TO RETURN";
-            hintEl.textContent = "scroll: hero · side: back";
+            panelMetaEl.textContent = "CLICK TO RETURN";
+            hintEl.textContent = "wheel: hero · click: back";
         } else if (mode === "inventory") {
             const actor = currentActor();
             const pack = actor && actor.pack ? actor.pack : [];
@@ -857,7 +903,7 @@
             panelTitleEl.textContent = "PACK " + pack.length + "/" + PD.PACK_MAX + (actor ? " · HP " + actor.hp + "/" + actor.maxHp : "");
             if (!pack.length && retreatSlot < 0) {
                 panelBodyEl.textContent = "EMPTY";
-                panelMetaEl.textContent = "SIDE TO CLOSE";
+                panelMetaEl.textContent = "CLICK TO CLOSE";
             } else {
                 panelBodyEl.textContent = pack.map(function (id, i) {
                     const info = (PD.ITEM_INFO && PD.ITEM_INFO[id]) || { name: id.toUpperCase(), effect: "" };
@@ -866,20 +912,20 @@
                     return (i === invIndex ? "> " : "  ") + info.name + suffix;
                 }).concat(retreatSlot >= 0 ? [(invIndex === retreatSlot ? "> " : "  ") + "«RETREAT TO TOWN»"] : []).join("\n");
                 panelMetaEl.textContent = retreatSlot >= 0 && invIndex === retreatSlot
-                    ? "SIDE: RETREAT · KEEPS GOLD + XP"
-                    : "SIDE: USE/EQUIP · HOLD: CLOSE";
+                    ? "CLICK: RETREAT · KEEPS GOLD + XP"
+                    : "CLICK: USE / EQUIP · ESC: CLOSE";
             }
-            hintEl.textContent = "scroll: slot · side: use · hold: close";
+            hintEl.textContent = "wheel: slot · click: use · esc: close";
         } else if (mode === "dead") {
             panelTitleEl.textContent = "YOU WAKE";
             panelBodyEl.textContent = deathLine || "THE DUNGEON SPITS YOU OUT.";
-            panelMetaEl.textContent = "SIDE TO RISE";
-            hintEl.textContent = "side: town";
+            panelMetaEl.textContent = "CLICK TO RISE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "win") {
             panelTitleEl.textContent = "THE ROAD OPENS";
             panelBodyEl.textContent = winLine || (WORLD.endings && WORLD.endings.hold) || PD.cannedWinLine();
-            panelMetaEl.textContent = "SIDE TO KEEPGATE";
-            hintEl.textContent = "side: town";
+            panelMetaEl.textContent = "CLICK TO KEEPGATE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "play" && save.run) {
             const abilities = { knight: "GUARD", scout: "DISARM", mage: "SPELL" };
             const ability = abilities[save.run.classId] || "ABILITY";
@@ -904,12 +950,40 @@
             if (save.run.classId === "scout" && !save.run.firstStrikeUsed) statuses.push("1ST STRIKE READY");
             if (save.run.poisonTurns > 0) statuses.push("POISON " + save.run.poisonTurns);
             const status = statuses.length ? " [" + statuses.join(" · ") + "]" : "";
-            const combatHint = room && room.enemies && room.enemies.length ? " · " + descriptions[save.run.classId] : "";
-            const hazardHint = room && room.hazard === "blood" ? " · BLOOD DRAINS ON MOVE" : (room && room.hazard === "reinforced" ? " · REINFORCED FOES" : "");
-            const choiceHint = choice && choice.active && save.run.floor >= 6 ? " · RISK: BLOOD FRENZY" : "";
-            hintEl.textContent = reward && reward.active && !reward.choice
-                ? rewardBoss + " REWARD: " + rewardName + " (" + rewardDesc + ") · side: take"
-                : "tap: go · side: wait · hold: pack · Q: " + ability + theme + hazardHint + combatHint + status + (choice && choice.active ? " · S:safe R:risk" : "") + choiceHint;
+            const combatHint = room && room.enemies && room.enemies.length ? descriptions[save.run.classId] : "";
+            const hazardHint = room && room.hazard === "blood" ? "BLOOD DRAINS ON MOVE" : (room && room.hazard === "reinforced" ? "REINFORCED FOES" : "");
+            const choiceHint = choice && choice.active && save.run.floor >= 6 ? "RISK ROUTE: +10G BLOOD FRENZY" : "";
+            if (reward && reward.active && !reward.choice) {
+                hintEl.textContent = rewardBoss + " REWARD: " + rewardName + " (" + rewardDesc + ")\nclick/enter: take · wheel: swap reward";
+                hintEl.classList.add("two-line");
+            } else {
+                const parts = [];
+                if (choice && choice.active) {
+                    parts.push("ROUTE: click=safe · wheel=risk");
+                }
+                if (status) {
+                    parts.push(status.replace(/^ /, ""));
+                }
+                if (hazardHint) {
+                    parts.push(hazardHint);
+                }
+                if (choiceHint) {
+                    parts.push(choiceHint);
+                }
+                if (combatHint) {
+                    parts.push(combatHint);
+                }
+                if (theme) {
+                    parts.push(theme.replace(/^ · /, ""));
+                }
+                let extras = parts.join(" · ");
+                while (extras.length > 34 && parts.length > 1) {
+                    parts.pop();
+                    extras = parts.join(" · ");
+                }
+                hintEl.textContent = "click: go · space: wait · esc: pack · Q: " + ability + (extras ? "\n" + extras : "");
+                hintEl.classList.add("two-line");
+            }
         }
         setStatus(hintEl ? hintEl.textContent : "");
     }
@@ -926,7 +1000,6 @@
         save.location = { kind: "site", id: siteId };
         mode = "play";
         invIndex = 0;
-        logLines = [PD.cannedRoomLine(save.run)];
         if (tier > 0) {
             const site = WORLD.sites[siteId];
             logLines.push("CONTRACT T" + tier + ": " + (site ? site.name : String(siteId).toUpperCase()));
@@ -1193,7 +1266,8 @@
             return;
         }
         if (mode === "travel") {
-            townIndex = (townIndex + delta + WORLD.TRAVEL_ORDER.length) % WORLD.TRAVEL_ORDER.length;
+            const rows = WORLD.travelOptions(save, save.location.id);
+            townIndex = (townIndex + delta + rows.length) % rows.length;
             render();
             return;
         }
@@ -1235,7 +1309,7 @@
             return;
         }
         if (mode === "bestiary") {
-            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "wraith", "ogre"];
+            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "acolyte", "wraith", "ogre"];
             const known = save.meta.bestiary || {};
             const rows = order.filter(function (type) { return known[type]; });
             if (rows.length) {
@@ -1425,7 +1499,14 @@
                 return;
             }
             if (option.id === "road") {
-                townIndex = Math.max(0, WORLD.TRAVEL_ORDER.indexOf(save.location.id));
+                const roadRows = WORLD.travelOptions(save, save.location.id);
+                townIndex = 0;
+                for (let i = 0; i < roadRows.length; i += 1) {
+                    if (!roadRows[i].here) {
+                        townIndex = i;
+                        break;
+                    }
+                }
                 mode = "travel";
                 render();
                 return;
@@ -1475,12 +1556,19 @@
             return;
         }
         if (mode === "travel") {
-            const destination = WORLD.TRAVEL_ORDER[townIndex];
-            if (WORLD.canTravel(save, save.location.id, destination)) {
-                save.location = { kind: "town", id: destination };
-                save.hero.lastInn = destination;
+            const rows = WORLD.travelOptions(save, save.location.id);
+            const dest = rows[townIndex];
+            if (dest && dest.here) {
+                returnToTown();
+                return;
+            }
+            if (dest && dest.open) {
+                const destName = (WORLD.towns[dest.id] && WORLD.towns[dest.id].name) || String(dest.id).toUpperCase();
+                save.location = { kind: "town", id: dest.id };
+                save.hero.lastInn = dest.id;
                 mode = "town";
                 townIndex = 0;
+                shopNote = "ROAD TO " + destName + " · HP + GOLD KEPT";
             }
             saveState();
             render();
@@ -1555,6 +1643,8 @@
                 save.flags = result.state.flags;
                 save.hero = result.state.hero || save.hero;
                 save.meta = result.state.meta || save.meta;
+            } else if (result && result.reason) {
+                shopNote = result.reason + " · FREE A PACK SLOT";
             }
             mode = "town";
             townIndex = 0;
