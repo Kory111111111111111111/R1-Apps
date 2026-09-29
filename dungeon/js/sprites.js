@@ -1,5 +1,4 @@
 (function (global) {
-    const PD = global.PocketDungeon = global.PocketDungeon || {};
     const SRC = 16;
     const SCALE = 2;
     const TILE_PX = SRC * SCALE;
@@ -125,6 +124,18 @@
             R: "#3a0808",
             K: "#f0c040",
             Y: "#f5d76e"
+        },
+        acolyte: {
+            O: "#120a1e",
+            C: "#3a2a5e",
+            S: "#241a3e",
+            H: "#7a5eaa",
+            W: "#a08ad0",
+            B: "#100818",
+            P: "#d4a017",
+            R: "#8a2038",
+            K: "#d4a017",
+            Y: "#6ec4e8"
         }
     };
 
@@ -199,6 +210,24 @@
             "SSSSSSSSSSSSSSSS",
             "SSSSSSSSSSSSSSSS",
             "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS"
+        ],
+        well: [
+            "SSSSSSSSSSSSSSSS",
+            "SSSSSSSSSSSSSSSS",
+            "SSSOOOOOOOOOOSSS",
+            "SSOCCCCCCCCCCOSS",
+            "SOCCCCCCCCCCCCOS",
+            "SOCSSSSSSSSSSCOS",
+            "SOCSCCCCCCCCSCOS",
+            "SOCSCYYYYYYSCCOS",
+            "SOCSCYSSSSYSCCOS",
+            "SOCSCYYYYYYSCCOS",
+            "SOCSCCCCCCCCSCOS",
+            "SOCSSSSSSSSSSCOS",
+            "SOCCCCCCCCCCCCOS",
+            "SSOCCCCCCCCCCOSS",
+            "SSSOOOOOOOOOOSSS",
             "SSSSSSSSSSSSSSSS"
         ],
         risk: [
@@ -598,6 +627,44 @@
                 "....OSS..SSO....",
                 "....OOO..OOO...."
             ]
+        ],
+        acolyte: [
+            [
+                "................",
+                ".....OOOOO......",
+                "....OHHHHHO.....",
+                "....OHWBWHO.....",
+                "....OHBBBHO.....",
+                ".....ORRRO......",
+                "......OOO.......",
+                "....OCCCCCO.....",
+                "...OCCYYYCCO....",
+                "...OCCYYYCCO....",
+                "....OCCCCCO.....",
+                ".....OC.CO......",
+                ".....OC.CO......",
+                "....OOS.SOO.....",
+                "....OO...OO.....",
+                "................"
+            ],
+            [
+                "................",
+                ".....OOOOO......",
+                "....OHHHHHO.....",
+                "....OHWBWHO.....",
+                "....OHBBBHO.....",
+                ".....ORRRO......",
+                "......OOO.......",
+                "....OCCCCCO.....",
+                "...OCCYWYCCO....",
+                "....OCCYCCO.....",
+                "....OCCCCCO.....",
+                ".....OC.CO......",
+                "....OOC.COO.....",
+                "...OO.S.S.OO....",
+                "...OO.....OO....",
+                "................"
+            ]
         ]
     };
 
@@ -755,7 +822,8 @@
         skeleton: "undead",
         ghoul: "ghoul",
         wraith: "wraith",
-        ogre: "boss"
+        ogre: "boss",
+        acolyte: "acolyte"
     };
 
     const baked = Object.create(null);
@@ -857,6 +925,7 @@
         if (ch === "~") return "poison";
         if (ch === "S") return "safe";
         if (ch === "R") return "risk";
+        if (ch === "!") return "well";
         return "floor";
     }
 
@@ -895,8 +964,8 @@
     // Tile character -> baked sprite id, resolved once instead of per tile per frame.
     const TILE_IDS = (function () {
         const map = Object.create(null);
-        const chs = "#+>$^~SR.";
-        const ids = ["wall", "door", "stairs", "chest", "trap", "poison", "safe", "risk", "floor"];
+        const chs = "#+>$^~SR!.";
+        const ids = ["wall", "door", "stairs", "chest", "trap", "poison", "safe", "risk", "well", "floor"];
         for (let i = 0; i < chs.length; i += 1) {
             map[chs.charAt(i)] = ids[i];
         }
@@ -983,8 +1052,8 @@
             const ex = enemy.x * TILE_PX;
             const ey = enemy.y * TILE_PX;
             if (enemy.telegraph) {
-                ctx.fillStyle = enemy.heavyTelegraph ? "#c44030" : (enemy.windup ? "#a080e8" : "#d4a017");
-                ctx.fillRect(ex + 12, ey + 1, enemy.heavyTelegraph ? 8 : (enemy.windup ? 6 : 4), 2);
+                ctx.fillStyle = enemy.heavyTelegraph ? "#c44030" : (enemy.windup ? "#a080e8" : (enemy.castWindup ? "#6ec4e8" : "#d4a017"));
+                ctx.fillRect(ex + 12, ey + 1, enemy.heavyTelegraph ? 8 : (enemy.windup || enemy.castWindup ? 6 : 4), 2);
             }
             ctx.drawImage(getBaked("enemy:" + enemy.type + ":" + anim), ex, ey);
             var eMaxHp = enemy.maxHp || enemy.hp;
@@ -1016,10 +1085,12 @@
         }
     }
 
+    // Plain projection of a run for the raster module. Exported so the render
+    // benchmark and the pixel-equivalence check can drive drawRoom directly.
     function getDrawState(run) {
-        const room = PD.currentRoom(run);
+        const room = global.PocketDungeon.currentRoom(run);
         if (!room) {
-            return { tiles: PD.blankTiles(), hero: null, enemies: [] };
+            return { tiles: global.PocketDungeon.blankTiles(), hero: null, enemies: [] };
         }
         return {
             tiles: room.tiles,
@@ -1031,7 +1102,17 @@
             },
             floor: run.floor,
             enemies: room.enemies.map(function (e) {
-                return { type: e.type, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, telegraph: !!e.telegraph, heavyTelegraph: !!e.heavyTelegraph, windup: !!e.windup };
+                return {
+                    type: e.type,
+                    x: e.x,
+                    y: e.y,
+                    hp: e.hp,
+                    maxHp: e.maxHp,
+                    telegraph: !!e.telegraph,
+                    heavyTelegraph: !!e.heavyTelegraph,
+                    windup: !!e.windup,
+                    castWindup: !!e.castWindup
+                };
             })
         };
     }
@@ -1043,12 +1124,13 @@
         return "WEST";
     }
 
-    PD.TILE_PX = TILE_PX;
-    PD.MAP_SIZE = MAP_SIZE;
-    PD.PALETTES = PALETTES;
-    PD.bakeAll = bakeAll;
-    PD.drawRoom = drawRoom;
-    PD.getBaked = getBaked;
-    PD.getDrawState = getDrawState;
-    PD.facingName = facingName;
+    global.PocketDungeon = global.PocketDungeon || {};
+    global.PocketDungeon.TILE_PX = TILE_PX;
+    global.PocketDungeon.MAP_SIZE = MAP_SIZE;
+    global.PocketDungeon.PALETTES = PALETTES;
+    global.PocketDungeon.bakeAll = bakeAll;
+    global.PocketDungeon.drawRoom = drawRoom;
+    global.PocketDungeon.getBaked = getBaked;
+    global.PocketDungeon.getDrawState = getDrawState;
+    global.PocketDungeon.facingName = facingName;
 })(window);

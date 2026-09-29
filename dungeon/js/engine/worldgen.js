@@ -2,6 +2,39 @@
     /* Procedural generation: room layout, doors, enemy population, floor assembly. */
     const PD = global.PocketDungeon = global.PocketDungeon || {};
 
+    function tileIsWalkable(tiles, x, y) {
+        const ch = (tiles[y] || "")[x];
+        return ch === "." || ch === "^" || ch === "~" || ch === "S" || ch === "R" || ch === ">" || ch === "!";
+    }
+
+    function repairEnemyPlacements(tiles, enemies) {
+        const occupied = {};
+        enemies.forEach(function (enemy) {
+            const key = enemy.x + "," + enemy.y;
+            if (!tileIsWalkable(tiles, enemy.x, enemy.y) || occupied[key]) {
+                let moved = false;
+                for (let y = 1; y < PD.MAP_SIZE - 1 && !moved; y += 1) {
+                    for (let x = 1; x < PD.MAP_SIZE - 1 && !moved; x += 1) {
+                        if (tileIsWalkable(tiles, x, y) && !occupied[x + "," + y]) {
+                            enemy.x = x;
+                            enemy.y = y;
+                            moved = true;
+                        }
+                    }
+                }
+                if (!moved) {
+                    enemy.hp = 0;
+                }
+            }
+            if (enemy.hp > 0) {
+                occupied[enemy.x + "," + enemy.y] = true;
+            }
+        });
+        return enemies.filter(function (enemy) {
+            return enemy.hp > 0;
+        });
+    }
+
     function punchDoors(tiles, doors) {
         PD.FACINGS.forEach(function (dir) {
             if (doors[dir] == null) {
@@ -65,6 +98,9 @@
 
     function makeEnemy(type, x, y, floor, tier) {
         const def = PD.ENEMY_DEFS[type];
+        if (!def) {
+            throw new Error("Unknown enemy: " + type);
+        }
         const bonus = Math.max(0, floor - def.debut);
         const t = Math.max(0, Math.round(Number(tier) || 0));
         const hp = def.hp + bonus + t;
@@ -81,8 +117,26 @@
             xpBonus: t,
             ai: def.ai || "slow",
             heavyCooldown: 0,
-            heavyTelegraph: false
+            heavyTelegraph: false,
+            heavyTargetX: null,
+            heavyTargetY: null,
+            huntTargetX: null,
+            huntTargetY: null,
+            castWindup: 0,
+            castTargetX: null,
+            castTargetY: null,
+            rewarded: false,
+            reinforced: false
         };
+    }
+
+    function reinforceEnemy(room, enemy) {
+        if (!room || !enemy || room.hazard !== "reinforced" || enemy.reinforced) {
+            return;
+        }
+        enemy.hp += 2;
+        enemy.maxHp += 2;
+        enemy.reinforced = true;
     }
 
     function enemyXp(enemy) {
@@ -95,67 +149,6 @@
 
     function enemyName(type) {
         return (PD.ENEMY_DEFS[type] && PD.ENEMY_DEFS[type].name) || String(type || "").toUpperCase();
-    }
-
-    function killEnemy(run, room, enemy, logs) {
-        if (!enemy || enemy.hp > 0) {
-            return false;
-        }
-        const name = enemyName(enemy.type);
-        logs.push(name + " DOWN");
-        const dropGold = enemy.gold || (PD.ENEMY_DEFS[enemy.type] && PD.ENEMY_DEFS[enemy.type].gold) || 0;
-        if (dropGold > 0) {
-            run.gold += dropGold;
-            logs.push("+" + dropGold + " GOLD");
-        }
-        run.kills = (run.kills || 0) + 1;
-        run.slainTypes = run.slainTypes || {};
-        run.slainTypes[enemy.type] = (run.slainTypes[enemy.type] || 0) + 1;
-        const xp = enemyXp(enemy);
-        if (xp > 0) {
-            logs.push("+" + xp + " XP");
-            PD.grantXp(run, xp, logs);
-        }
-        if (PD.hasCharm(run, "drain_charm") && run.hp > 0 && run.hp < run.maxHp) {
-            run.hp = PD.clamp(run.hp + 1, 0, run.maxHp);
-            logs.push("DRAIN +1");
-        }
-        if (room) {
-            room.enemies = room.enemies.filter(function (e) {
-                return e.hp > 0;
-            });
-            if ((enemy.type === "wraith" || enemy.type === "ogre") && room.kind === "stairs") {
-                room.reward = {
-                    active: true,
-                    boss: enemy.type,
-                    choice: null,
-                    options: enemy.type === "ogre" ? ["gold", "heal", "renown"] : ["heal", "gold", "renown"],
-                    boon: enemy.type === "ogre" ? "lastStand" : "phaseStep"
-                };
-                logs.push("REWARD AWAITS");
-            }
-        }
-        return true;
-    }
-
-    function pickLoot(rng) {
-        const roll = rng.int(1, 100);
-        if (roll <= 45) {
-            return "potion";
-        }
-        if (roll <= 65) {
-            return "coin";
-        }
-        if (roll <= 78) {
-            return "blade";
-        }
-        if (roll <= 88) {
-            return "mail";
-        }
-        if (roll <= 96) {
-            return "greater_potion";
-        }
-        return "shield";
     }
 
     function pickEnemyType(floor, rng, pool) {
@@ -188,6 +181,13 @@
             reserved.push({ x: 4, y: 3 });
         }
 
+        if (opts.sanctum) {
+            room.kind = "sanctum";
+            room.sanctumUsed = false;
+            PD.setTile(room, 3, 3, "!");
+            reserved.push({ x: 3, y: 3 });
+            return;
+        }
         if (opts.cleared) {
             return;
         }
@@ -218,16 +218,18 @@
         }
         if (opts.hazard === "reinforced") {
             room.hazard = "reinforced";
-            if (room.enemies.length) {
-                room.enemies.forEach(function (enemy) {
-                    enemy.hp += 2;
-                    enemy.maxHp += 2;
-                });
-            }
         }
         if (opts.hazard === "blood") {
             room.hazard = "blood";
         }
+        const reinforceEnemies = function () {
+            if (room.hazard !== "reinforced") {
+                return;
+            }
+            room.enemies.forEach(function (enemy) {
+                reinforceEnemy(room, enemy);
+            });
+        };
 
         const spots = interiorSpots(room).filter(function (p) {
             return PD.getTile(room, p.x, p.y) === "." && !isReserved(p.x, p.y, room.doors, reserved);
@@ -249,6 +251,7 @@
             wight.atk += 1;
             wight.xpBonus = (wight.xpBonus || 0) + 6;
             room.enemies.push(wight);
+            reinforceEnemies();
             return;
         }
 
@@ -265,11 +268,12 @@
             room.enemies.push(makeEnemy(pickEnemyType(floor, rng, opts.enemyPool), spot.x, spot.y, floor, tier));
             reserved.push(spot);
         }
+        reinforceEnemies();
 
         if (rng.int(1, 100) <= 35) {
             const spot = takeSpot();
             if (spot) {
-                room.chest = { x: spot.x, y: spot.y, item: pickLoot(rng), open: false };
+                room.chest = { x: spot.x, y: spot.y, item: PD.pickLoot(rng), open: false };
                 PD.setTile(room, spot.x, spot.y, "$");
                 reserved.push(spot);
             }
@@ -289,8 +293,8 @@
         const shortSite = Number(run.siteRoomCount) > 0;
         const extra = run.floor >= 7 ? 2 : 1;
         const roomCount = shortSite
-            ? PD.clamp(run.siteRoomCount, 2, 8)
-            : PD.clamp(5 + rng.int(0, 3), 5, 8);
+            ? PD.clamp(run.siteRoomCount, 2, PD.MAX_ROOMS)
+            : PD.clamp(5 + rng.int(0, 3), 5, PD.MAX_ROOMS);
         const branchCount = shortSite ? 0 : Math.min(extra, roomCount - 2);
         const backbone = roomCount - branchCount;
 
@@ -304,21 +308,28 @@
                 enemies: [],
                 chest: null,
                 choice: null,
+                sanctumUsed: false,
                 theme: (PD.FLOOR_THEMES[run.floor] && PD.FLOOR_THEMES[run.floor].name) || "DARK STONE"
             });
         }
 
         for (let i = 0; i < backbone - 1; i += 1) {
             if (!connectRooms(rooms, i, i + 1, rng)) {
-                console.warn("backbone connect failed", i, i + 1);
+                for (let retry = 0; retry < backbone && !connectRooms(rooms, i, i + 1, rng); retry += 1) {
+                    // The retry loop is intentionally deterministic after the seeded attempt.
+                }
             }
         }
 
         let nextId = backbone;
         for (let b = 0; b < branchCount; b += 1) {
-            const parent = rng.int(0, Math.max(0, backbone - 2));
-            if (!connectRooms(rooms, parent, nextId, rng)) {
-                connectRooms(rooms, 0, nextId, rng);
+            const preferred = rng.int(0, Math.max(0, backbone - 2));
+            let attached = connectRooms(rooms, preferred, nextId, rng);
+            for (let candidate = 0; !attached && candidate < backbone; candidate += 1) {
+                attached = connectRooms(rooms, candidate, nextId, rng);
+            }
+            if (!attached) {
+                console.warn("branch connect failed", nextId);
             }
             rooms[nextId].kind = "branch";
             nextId += 1;
@@ -330,20 +341,31 @@
         const siteLimit = run.maxSiteFloor || PD.MAX_FLOOR;
         const isHoldSite = !run.siteId || run.siteId === "hold";
         const midBoss = isHoldSite && run.floor === 4;
+        if (isHoldSite && (run.floor === 3 || run.floor === 6) && run.floor < siteLimit) {
+            const sanctumRoom = rooms.find(function (room) {
+                return room.kind === "branch";
+            }) || rooms.find(function (room) {
+                return room.kind === "hall";
+            });
+            if (sanctumRoom) {
+                sanctumRoom.kind = "sanctum";
+            }
+        }
         rooms.forEach(function (room) {
             var pool = run.enemyPool;
             if (!pool && isHoldSite) {
                 if (run.floor <= 2) {
                     pool = ["slime", "rat", "bat"];
-                } else if (run.floor <= 5) {
+                } else if (run.floor <= 4) {
                     pool = ["slime", "bat", "skeleton", "ghoul"];
                 } else {
-                    pool = ["bat", "skeleton", "ghoul"];
+                    pool = ["bat", "skeleton", "ghoul", "acolyte"];
                 }
             }
             populateRoom(room, run.floor, rng, {
                 start: room.kind === "start",
                 stairs: room.kind === "stairs",
+                sanctum: room.kind === "sanctum",
                 boss: room.kind === "stairs" && run.floor === PD.MAX_FLOOR && siteLimit === PD.MAX_FLOOR,
                 midBoss: room.kind === "stairs" && midBoss,
                 named: room.kind === "stairs" && !!run.namedLast && run.floor === siteLimit,
@@ -351,7 +373,7 @@
                 tier: run.contract || 0,
                 enemyPool: pool,
                 choice: room.kind === "branch" && run.floor < siteLimit && !run.siteRoomCount,
-                hazard: run.floor >= 5 && room.kind !== "start" && room.kind !== "stairs"
+                hazard: run.floor >= 5 && room.kind !== "start" && room.kind !== "stairs" && room.kind !== "sanctum"
                     ? (run.floor >= 7 ? "blood" : "reinforced") : null
             });
         });
@@ -365,15 +387,16 @@
     }
 
 
+    PD.tileIsWalkable = tileIsWalkable;
+    PD.repairEnemyPlacements = repairEnemyPlacements;
     PD.punchDoors = punchDoors;
     PD.interiorSpots = interiorSpots;
     PD.isReserved = isReserved;
     PD.connectRooms = connectRooms;
     PD.makeEnemy = makeEnemy;
+    PD.reinforceEnemy = reinforceEnemy;
     PD.enemyXp = enemyXp;
     PD.enemyName = enemyName;
-    PD.killEnemy = killEnemy;
-    PD.pickLoot = pickLoot;
     PD.pickEnemyType = pickEnemyType;
     PD.populateRoom = populateRoom;
     PD.generateFloor = generateFloor;

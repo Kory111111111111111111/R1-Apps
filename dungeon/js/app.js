@@ -1,6 +1,5 @@
 (function () {
     const PD = window.PocketDungeon;
-    const RT = window.PDRuntime;
     const WORLD = window.PocketDungeonWorld;
     const STORAGE_KEY = "dungeonState";
     const SIDE_CLICK_DEBOUNCE_MS = 120;
@@ -62,37 +61,9 @@
     let walkGen = 0;
     const WALK_STEP_MS = 120;
 
-    // DOM write guards: skip redundant text/hidden writes so an unchanged
-    // frame does not trigger a relayout. Rendered output is identical.
-    const lastText = new Map();
-
-    function setText(el, text) {
-        if (!el || lastText.get(el) === text) {
-            return;
-        }
-        lastText.set(el, text);
-        el.textContent = text;
-    }
-
-    const lastHidden = new Map();
-
-    function setHidden(el, hidden) {
-        if (!el || lastHidden.get(el) === hidden) {
-            return;
-        }
-        lastHidden.set(el, hidden);
-        el.hidden = hidden;
-    }
-
-    function setToggle(el, cls, on) {
-        if (el && el.classList.contains(cls) !== !!on) {
-            el.classList.toggle(cls, !!on);
-        }
-    }
-
     function setStatus(text) {
         if (statusEl) {
-            setText(statusEl, text);
+            statusEl.textContent = text;
         }
     }
 
@@ -110,16 +81,70 @@
         }, 260);
     }
 
+    function utf8ToBase64(str) {
+        const bytes = new TextEncoder().encode(str);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += 1) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
+
+    function base64ToUtf8(b64) {
+        try {
+            const binary = atob(b64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return new TextDecoder().decode(bytes);
+        } catch (error) {
+            return b64;
+        }
+    }
 
     async function loadState() {
-        const raw = await RT.loadJson(STORAGE_KEY, RT.base64ToUtf8);
-        if (raw) {
-            save = PD.applySnapshot(raw);
+        try {
+            if (window.creationStorage && window.creationStorage.plain) {
+                const stored = await window.creationStorage.plain.getItem(STORAGE_KEY);
+                if (stored) {
+                    const decoded = base64ToUtf8(stored);
+                    try {
+                        save = PD.applySnapshot(JSON.parse(decoded));
+                        return;
+                    } catch (error) {
+                        save = PD.applySnapshot(JSON.parse(stored));
+                        return;
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn("creationStorage read failed", error);
+        }
+        try {
+            const stored = window.localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+                save = PD.applySnapshot(JSON.parse(stored));
+            }
+        } catch (error) {
+            console.warn("localStorage read failed", error);
         }
     }
 
     async function saveState() {
-        await RT.saveJson(STORAGE_KEY, JSON.stringify(PD.snapshot(save)), RT.utf8ToBase64);
+        const payload = JSON.stringify(PD.snapshot(save));
+        try {
+            if (window.creationStorage && window.creationStorage.plain) {
+                await window.creationStorage.plain.setItem(STORAGE_KEY, utf8ToBase64(payload));
+            }
+        } catch (error) {
+            console.warn("creationStorage write failed", error);
+        }
+        try {
+            window.localStorage.setItem(STORAGE_KEY, payload);
+        } catch (error) {
+            console.warn("localStorage write failed", error);
+        }
     }
 
     function ensureAudio() {
@@ -279,6 +304,9 @@
         }
     }
 
+    function hasPluginHandler() {
+        return typeof PluginMessageHandler !== "undefined" && PluginMessageHandler && PluginMessageHandler.postMessage;
+    }
 
     function stripMarkdownFences(text) {
         return String(text)
@@ -329,7 +357,7 @@
 
     function sendLlmRequest(message, wantsVoice, wantsJournal) {
         return new Promise(function (resolve, reject) {
-            if (!RT.hasPluginHandler()) {
+            if (!hasPluginHandler()) {
                 reject(new Error("PluginMessageHandler not available"));
                 return;
             }
@@ -418,7 +446,9 @@
             return;
         }
         const canned = PD.cannedRoomLine(save.run);
-        pushLog([canned]);
+        if (logLines[logLines.length - 1] !== canned) {
+            pushLog([canned]);
+        }
         render();
         const run = save.run;
         pendingLlmKind = "room";
@@ -476,7 +506,7 @@
     }
 
     function requestTalkFlavor(npcId, node) {
-        if (!node || !node.ifAll || !RT.hasPluginHandler()) {
+        if (!node || !node.ifAll || !hasPluginHandler()) {
             return;
         }
         const canned = (node.lines && node.lines[0]) || "";
@@ -491,7 +521,7 @@
                 return;
             }
             if (panelMetaEl) {
-                setText(panelMetaEl, parsed.line.slice(0, 80));
+                panelMetaEl.textContent = parsed.line.slice(0, 80);
             }
         }).catch(function (error) {
             console.warn("talk flavor llm failed", error);
@@ -580,16 +610,19 @@
 
     function render() {
         drawMap();
+        if (hintEl) {
+            hintEl.classList.remove("two-line");
+        }
         const playing = mode === "play" || mode === "inventory";
         if (hudEl) {
-            setHidden(hudEl, !playing || !save.run);
+            hudEl.hidden = !playing || !save.run;
         }
         if (logEl) {
-            setHidden(logEl, !playing);
-            setText(logEl, logLines.join("\n"));
+            logEl.hidden = !playing;
+            logEl.textContent = logLines.join("\n");
         }
         if (save.run && hudFloorEl && hudStatsEl) {
-            setText(hudFloorEl, "L" + (save.run.level || 1) + " FL" + save.run.floor);
+            hudFloorEl.textContent = "L" + (save.run.level || 1) + " FL" + save.run.floor;
             let statsText = "HP " + save.run.hp + "/" + save.run.maxHp + "  G" + save.run.gold + "  R" + (save.run.renown || 0);
             if (save.run.poisonTurns > 0) {
                 statsText = "PSN " + save.run.poisonTurns + "  " + statsText;
@@ -597,9 +630,9 @@
             if (save.run.guardTurns > 0) {
                 statsText = "GRD  " + statsText;
             }
-            setText(hudStatsEl, statsText);
+            hudStatsEl.textContent = statsText;
             const isLowHp = save.run.hp <= Math.ceil(save.run.maxHp * 0.25);
-            setToggle(hudStatsEl, "hp-critical", isLowHp);
+            hudStatsEl.classList.toggle("hp-critical", isLowHp);
         }
         if (xpFillEl) {
             const running = !!(save.run && (mode === "play" || mode === "inventory"));
@@ -614,22 +647,27 @@
 
         const showPanel = mode !== "play";
         if (panelEl) {
-            setHidden(panelEl, !showPanel);
+            panelEl.hidden = !showPanel;
         }
 
         if (mode === "title") {
             const opts = titleOptions();
             titleIndex = titleIndex % opts.length;
-            setText(panelTitleEl, "POCKET DUNGEON");
-            setText(panelBodyEl, opts.map(function (opt, i) {
+            panelTitleEl.textContent = "POCKET DUNGEON";
+            panelBodyEl.textContent = opts.map(function (opt, i) {
                 return (i === titleIndex ? "> " : "  ") + opt;
-            }).join("\n"));
-            setText(panelMetaEl, (save.meta.renown ? "RENOWN " + save.meta.renown + " · " : "") + "THREE TOWNS · A BROKEN ROAD");
-            setText(hintEl, "scroll: choose · side: select");
+            }).join("\n");
+            const titleLoc = save.location && save.location.id ? save.location.id : null;
+            const titleTown = titleLoc ? (WORLD.towns[titleLoc] ? WORLD.towns[titleLoc].name : String(titleLoc).toUpperCase()) : null;
+            const titleMeta = save.hero && titleLoc
+                ? (save.location.kind === "town" ? titleTown + " · " + (WORLD.townGoal(save) || "KEEP WALKING") : "INSIDE " + titleTown)
+                : "THREE TOWNS · A BROKEN ROAD";
+            panelMetaEl.textContent = (save.meta.renown ? "RENOWN " + save.meta.renown + " · " : "") + titleMeta;
+            hintEl.textContent = "click/enter: select · wheel/scroll: move";
         } else if (mode === "class") {
             const id = PD.CLASS_ORDER[classIndex];
             const cls = PD.CLASSES[id];
-            setText(panelTitleEl, cls.name);
+            panelTitleEl.textContent = cls.name;
             const shrine = save.meta && save.meta.shrinePurchases || {};
             const bHp = (Math.max(0, Math.round(Number(shrine.vigor) || 0))) * 2;
             const bAtk = Math.max(0, Math.round(Number(shrine.edge) || 0));
@@ -637,58 +675,90 @@
             const hpText = "HP " + (cls.hp + bHp) + (bHp ? "+" + bHp : "");
             const atkText = "ATK " + (cls.atk + bAtk) + (bAtk ? "+" + bAtk : "");
             const defText = "DEF " + (cls.def + bDef) + (bDef ? "+" + bDef : "");
-            setText(panelBodyEl, hpText + "  " + atkText + "  " + defText + "\n" + (cls.abilityDesc || cls.desc || ""));
-            setText(panelMetaEl, "SIDE TO BEGIN");
-            setText(hintEl, "scroll: class · side: go");
+            const startKit = {
+                knight: "STARTS: BARE-HANDED",
+                scout: "STARTS: 15G + POTION",
+                mage: "STARTS: BLADE (EQUIPPED)"
+            };
+            panelBodyEl.textContent = hpText + "  " + atkText + "  " + defText + "\n" + (cls.abilityDesc || cls.desc || "") + "\n" + (startKit[id] || "");
+            panelMetaEl.textContent = "CLICK TO BEGIN";
+            hintEl.textContent = "click/enter: begin · wheel: class";
         } else if (mode === "town") {
             refreshTownMenu();
             const town = WORLD.towns[save.location.id] || WORLD.towns.ashford;
-            setText(panelTitleEl, town.name);
-            setText(panelBodyEl, townMenu.map(function (option, i) {
+            panelTitleEl.textContent = town.name;
+            panelBodyEl.textContent = townMenu.map(function (option, i) {
                 return (i === townIndex ? "> " : "  ") + option.label;
-            }).join("\n"));
-            setText(panelMetaEl, shopNote || ("HP " + save.hero.hp + "/" + save.hero.maxHp + "  G" + save.hero.gold));
-            setText(hintEl, "scroll: choose · side: select · hold: pack");
+            }).join("\n");
+            const goal = WORLD.townGoal(save);
+            const heroStats = "HP " + save.hero.hp + "/" + save.hero.maxHp + " G" + save.hero.gold;
+            panelMetaEl.textContent = shopNote || (goal ? heroStats + " · " + goal : heroStats);
+            hintEl.textContent = "click/enter: go · wheel/scroll: move · esc: pack";
         } else if (mode === "travel") {
             const from = save.location.id;
-            setText(panelTitleEl, "ROAD");
-            setText(panelBodyEl, WORLD.TRAVEL_ORDER.map(function (id, i) {
-                return (i === townIndex ? "> " : "  ") + WORLD.travelLabel(save, from, id);
-            }).join("\n"));
-            setText(panelMetaEl, "SIDE TO TRAVEL · HOLD TO RETURN");
-            setText(hintEl, "scroll: destination · side: travel");
+            const rows = WORLD.travelOptions(save, from);
+            if (!rows.length) {
+                mode = "town";
+                render();
+                return;
+            }
+            townIndex = ((townIndex % rows.length) + rows.length) % rows.length;
+            const sel = rows[townIndex];
+            panelTitleEl.textContent = "ROAD";
+            panelBodyEl.textContent = rows.map(function (row, i) {
+                const mark = i === townIndex ? "> " : "  ";
+                const tag = row.here ? " [HERE]" : (row.barred ? " [BARRED]" : "");
+                return mark + row.name + tag;
+            }).join("\n");
+            if (sel.here) {
+                panelMetaEl.textContent = "YOU ARE HERE · ESC TO LEAVE";
+                hintEl.textContent = "esc: back · wheel: towns";
+            } else if (sel.barred) {
+                panelMetaEl.textContent = "BARRED · " + (WORLD.roadBlocker(save, sel.id) || "TALK TO THE TOWN");
+                hintEl.textContent = "road blocked · esc: back";
+            } else {
+                panelMetaEl.textContent = "ROAD OPEN · ENTER TO TRAVEL";
+                hintEl.textContent = "click/enter: travel · esc: back";
+            }
         } else if (mode === "shop") {
             const stock = WORLD.shops[save.location.id] || [];
-            setText(panelTitleEl, "SHOP");
+            panelTitleEl.textContent = "SHOP";
             if (!stock.length) {
-                setText(panelBodyEl, "CLOSED");
+                panelBodyEl.textContent = "CLOSED";
+                panelMetaEl.textContent = shopNote || "NOTHING FOR SALE";
+                hintEl.textContent = "esc: back";
             } else {
-                setText(panelBodyEl, stock.map(function (item, i) {
+                panelBodyEl.textContent = stock.map(function (item, i) {
                     return (i === townIndex ? "> " : "  ") + item.name + " G" + item.price;
-                }).join("\n"));
+                }).join("\n");
+                const selItem = stock[townIndex];
+                const selInfo = selItem && PD.ITEM_INFO && PD.ITEM_INFO[selItem.id];
+                panelMetaEl.textContent = shopNote || ("G" + save.hero.gold + " · " + ((selInfo && selInfo.effect) || "") + " · click: buy");
+                hintEl.textContent = "wheel: item · click: buy · esc: back";
             }
-            setText(panelMetaEl, shopNote || ("G" + save.hero.gold + " · SIDE TO BUY · HOLD TO RETURN"));
-            setText(hintEl, "scroll: item · side: buy");
         } else if (mode === "shrine") {
             const upgrades = WORLD.shrineUpgrades || [];
-            setText(panelTitleEl, "SHRINE");
+            panelTitleEl.textContent = "SHRINE";
             const renown = (save.meta && save.meta.renown) || 0;
             if (!upgrades.length) {
-                setText(panelBodyEl, "EMPTY");
+                panelBodyEl.textContent = "EMPTY";
+                panelMetaEl.textContent = "NO POWERS LEFT · ESC TO LEAVE";
+                hintEl.textContent = "esc: back";
             } else {
-                setText(panelBodyEl, upgrades.map(function (item, i) {
+                panelBodyEl.textContent = upgrades.map(function (item, i) {
                     return (i === townIndex ? "> " : "  ") + item.name + " " + item.cost + "R";
-                }).join("\n"));
+                }).join("\n");
+                const selUp = upgrades[townIndex];
+                panelMetaEl.textContent = shopNote || ("R" + renown + " · " + (selUp ? selUp.name : "") + " · click: buy");
+                hintEl.textContent = "wheel: power · click: buy · esc: back";
             }
-            setText(panelMetaEl, shopNote || ("RENOWN " + renown + " · SIDE TO BUY · HOLD TO RETURN"));
-            setText(hintEl, "scroll: power · side: buy");
         } else if (mode === "hero") {
             const hero = save.hero;
             const cls = hero && PD.CLASSES[hero.classId];
-            setText(panelTitleEl, hero ? ((cls && cls.name) || "HERO") : "HERO");
+            panelTitleEl.textContent = hero ? ((cls && cls.name) || "HERO") : "HERO";
             if (!hero) {
-                setText(panelBodyEl, "NO HERO YET.");
-                setText(panelMetaEl, "SIDE TO RETURN");
+                panelBodyEl.textContent = "NO HERO YET.";
+                panelMetaEl.textContent = "CLICK TO RETURN";
             } else {
                 const gear = PD.gearBonus ? PD.gearBonus(hero.gear) : { atk: 0, def: 0, hp: 0 };
                 const level = hero.level || 1;
@@ -699,7 +769,7 @@
                         "HP " + hero.hp + "/" + (hero.maxHp + gear.hp) +
                         "  ATK " + (hero.atk + gear.atk) + "  DEF " + (hero.def + gear.def) + "\n" +
                         "GOLD " + hero.gold + " · RENOWN " + (save.meta.renown || 0);
-                    setText(panelMetaEl, "PAGE 1/3 · SIDE TO EXIT");
+                    panelMetaEl.textContent = "PAGE 1/3 · CLICK TO EXIT";
                 } else if (heroPageIndex === 1) {
                     const gearItem = function (id) {
                         return id && PD.ITEM_INFO && PD.ITEM_INFO[id] ? PD.ITEM_INFO[id].name : null;
@@ -713,7 +783,7 @@
                         slotLine("ARMOR", g.armor) + "\n" +
                         slotLine("CHARM", g.charm) + "\n" +
                         "GEAR BONUS +" + gear.atk + "A +" + gear.def + "D +" + gear.hp + "HP";
-                    setText(panelMetaEl, "PAGE 2/3 · SIDE TO EXIT");
+                    panelMetaEl.textContent = "PAGE 2/3 · CLICK TO EXIT";
                 } else {
                     const siteNames = Object.keys(save.meta.contractTiers || {}).map(function (id) {
                         return id.toUpperCase() + " T" + save.meta.contractTiers[id];
@@ -722,12 +792,12 @@
                         "BEST FL" + (save.meta.bestFloor || 0) + " · KILLS " + (save.meta.kills || 0) + "\n" +
                         "DEATHS " + (save.meta.deaths || 0) + " · CONTRACTS " + (save.meta.contractsDone || 0) + "\n" +
                         (siteNames.length ? siteNames.join(" · ") : "NO CONTRACTS YET");
-                    setText(panelMetaEl, "PAGE 3/3 · SIDE TO EXIT");
+                    panelMetaEl.textContent = "PAGE 3/3 · CLICK TO EXIT";
                 }
             }
-            setText(hintEl, "scroll: page · side: back");
+            hintEl.textContent = "wheel: page · click: back";
         } else if (mode === "bestiary") {
-            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "wraith", "ogre"];
+            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "acolyte", "wraith", "ogre"];
             const known = save.meta.bestiary || {};
             const rows = order.filter(function (type) {
                 return known[type];
@@ -735,75 +805,79 @@
                 const name = (PD.ENEMY_DEFS[type] && PD.ENEMY_DEFS[type].name) || type.toUpperCase();
                 return name + " ×" + known[type];
             });
-            setText(panelTitleEl, "BESTIARY");
+            panelTitleEl.textContent = "BESTIARY";
             if (!rows.length) {
-                setText(panelBodyEl, "NOTHING SLAIN YET.");
+                panelBodyEl.textContent = "NOTHING SLAIN YET.";
             } else {
                 bestiaryIndex = ((bestiaryIndex % rows.length) + rows.length) % rows.length;
                 const lines = [];
                 for (let i = 0; i < rows.length; i += 1) {
                     lines.push((i === bestiaryIndex ? "> " : "  ") + rows[i]);
                 }
-                setText(panelBodyEl, lines.slice(0, 7).join("\n"));
+                panelBodyEl.textContent = lines.slice(0, 7).join("\n");
             }
-            setText(panelMetaEl, Object.keys(known).length + "/7 KNOWN · SIDE TO RETURN");
-            setText(hintEl, "scroll: foe · side: back");
+            panelMetaEl.textContent = Object.keys(known).length + "/8 KNOWN · CLICK TO RETURN";
+            hintEl.textContent = "wheel: foe · click: back";
         } else if (mode === "help") {
-            setText(panelTitleEl, "HOW TO PLAY");
+            panelTitleEl.textContent = "HOW TO PLAY";
             panelBodyEl.textContent =
-                "MOVE: tap a tile · or scroll: face + side: step\n" +
-                "WAIT: side · FIGHT: walk into a foe\n" +
-                "ABILITY: Q (GUARD/DISARM/SPELL)\n" +
-                "PACK: hold · RETREAT from the pack\n" +
-                "SIDE CLICK selects · HOLD returns";
-            setText(panelMetaEl, "DEATH HALVES GOLD · KEEPS LEVELS");
-            setText(hintEl, "side: back");
+                "CLICK / ENTER = SELECT\n" +
+                "WHEEL / ARROWS / W S = MOVE\n" +
+                "ESC / I = PACK OR BACK\n" +
+                "Q = ABILITY · SPACE = WAIT\n" +
+                "CLICK A TILE = WALK / FIGHT\n" +
+                "ROADS OPEN EAST WHEN SITES FALL\n" +
+                "TALK FIRST · MENUS SHOW THE GOAL\n" +
+                "DEATH HALVES GOLD · LEVELS KEEP";
+            panelMetaEl.textContent = "TALK · SHOP · REST · SHRINE · PACK · JOURNAL";
+            hintEl.textContent = "click/esc: back";
         } else if (mode === "journal") {
-            setText(panelTitleEl, "JOURNAL");
-            setText(panelBodyEl, (save.meta.journal || []).slice(0, 4).join("\n") || "NO ENTRIES YET.");
-            setText(panelMetaEl, "SIDE TO RETURN");
-            setText(hintEl, "side: back");
+            panelTitleEl.textContent = "JOURNAL";
+            panelBodyEl.textContent = (save.meta.journal || []).slice(0, 4).join("\n") || "NO ENTRIES YET.";
+            panelMetaEl.textContent = "CLICK TO RETURN";
+            hintEl.textContent = "click/esc: back";
         } else if (mode === "talk") {
             if (talkPhase === "npcs") {
                 const npcs = (WORLD.towns[save.location.id] || WORLD.towns.ashford).npcs;
-                setText(panelTitleEl, "TALK");
-                setText(panelBodyEl, npcs.map(function (id, i) {
+                panelTitleEl.textContent = "TALK";
+                panelBodyEl.textContent = npcs.map(function (id, i) {
                     return (i === townIndex ? "> " : "  ") + WORLD.npcName(id);
-                }).join("\n"));
-                setText(panelMetaEl, "SIDE TO SPEAK · HOLD TO RETURN");
-                setText(hintEl, "scroll: person · side: talk");
+                }).join("\n");
+                const npcSel = npcs[townIndex];
+                panelMetaEl.textContent = (npcSel ? (WORLD.npcRole(npcSel) || WORLD.npcName(npcSel)) : "") + " · CLICK TO SPEAK";
+                hintEl.textContent = "wheel: person · click: talk · esc: back";
             } else {
                 const node = WORLD.getDialogue(talkNpc, save.flags);
-                setText(panelTitleEl, WORLD.npcName(talkNpc));
+                panelTitleEl.textContent = WORLD.npcName(talkNpc);
                 const lines = (node && node.lines) || ["..."];
                 const choices = (node && node.choices) || [{ id: "leave", label: "LEAVE" }];
-                setText(panelBodyEl, lines.join("\n") + "\n" + choices.map(function (choice, i) {
+                panelBodyEl.textContent = lines.join("\n") + "\n" + choices.map(function (choice, i) {
                     return (i === townIndex ? "> " : "  ") + choice.label;
-                }).join("\n"));
-                setText(panelMetaEl, "SIDE TO CHOOSE · HOLD TO RETURN");
-                setText(hintEl, "scroll: choice · side: confirm");
+                }).join("\n");
+                panelMetaEl.textContent = "CLICK A CHOICE · ESC: BACK";
+                hintEl.textContent = "wheel: choice · click: answer · esc: back";
             }
         } else if (mode === "wake") {
             const inn = WORLD.towns[save.hero && save.hero.lastInn] || WORLD.towns.ashford;
-            setText(panelTitleEl, "YOU WAKE");
+            panelTitleEl.textContent = "YOU WAKE";
             const entry = save.meta.epitaphs && save.meta.epitaphs[0];
             const summary = entry ? (entry.line || deathLine || "THE DUNGEON SPITS YOU OUT.") : (deathLine || "THE DUNGEON SPITS YOU OUT.");
             const kills = entry && entry.kills != null ? entry.kills : 0;
             const renownGain = entry && entry.renown != null ? entry.renown : 0;
             const floor = entry && entry.floor != null ? entry.floor : 0;
-            setText(panelBodyEl, summary + "\nFL" + floor + " · " + kills + " KILLS · +" + renownGain + " RENOWN");
-            setText(panelMetaEl, "GOLD HALVED · BEST FL" + (save.meta.bestFloor || 0) + " · SIDE TO RISE");
-            setText(hintEl, "side: town");
+            panelBodyEl.textContent = summary + "\nFL" + floor + " · " + kills + " KILLS · +" + renownGain + " RENOWN";
+            panelMetaEl.textContent = "GOLD HALVED · BEST FL" + (save.meta.bestFloor || 0) + " · CLICK TO RISE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "clear") {
-            setText(panelTitleEl, "SITE CLEAR");
-            setText(panelBodyEl, clearLine || "THE ROAD CHANGES.");
-            setText(panelMetaEl, "SIDE TO RETURN");
-            setText(hintEl, "side: town");
+            panelTitleEl.textContent = "SITE CLEAR";
+            panelBodyEl.textContent = clearLine || "THE ROAD CHANGES.";
+            panelMetaEl.textContent = "CLICK TO RETURN TO TOWN";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "finale") {
-            setText(panelTitleEl, "THE ROAD OPENS");
-            setText(panelBodyEl, winLine || WORLD.endings.hold);
-            setText(panelMetaEl, "SIDE TO KEEPGATE");
-            setText(hintEl, "side: town");
+            panelTitleEl.textContent = "THE ROAD OPENS";
+            panelBodyEl.textContent = winLine || WORLD.endings.hold;
+            panelMetaEl.textContent = "CLICK TO KEEPGATE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "graveyard") {
             const count = save.meta.epitaphs.length;
             if (!count) {
@@ -814,44 +888,44 @@
             graveIndex = ((graveIndex % count) + count) % count;
             const entry = save.meta.epitaphs[graveIndex];
             const clsName = PD.CLASSES[entry.classId] ? PD.CLASSES[entry.classId].name : String(entry.classId).toUpperCase();
-            setText(panelTitleEl, "FALLEN (" + (graveIndex + 1) + "/" + count + ")");
+            panelTitleEl.textContent = "FALLEN (" + (graveIndex + 1) + "/" + count + ")";
             const kills = entry.kills != null ? entry.kills : 0;
             const gold = entry.gold != null ? entry.gold : 0;
             const renown = entry.renown != null ? entry.renown : 0;
             const level = entry.level != null ? "L" + entry.level + " " : "";
-            setText(panelBodyEl, level + "FL" + entry.floor + " " + clsName + " · " + kills + "K · " + gold + "G · " + renown + "R\n\n\"" + entry.line + "\"");
-            setText(panelMetaEl, "SIDE TO RETURN");
-            setText(hintEl, "scroll: hero · side: back");
+            panelBodyEl.textContent = level + "FL" + entry.floor + " " + clsName + " · " + kills + "K · " + gold + "G · " + renown + "R\n\n\"" + entry.line + "\"";
+            panelMetaEl.textContent = "CLICK TO RETURN";
+            hintEl.textContent = "wheel: hero · click: back";
         } else if (mode === "inventory") {
             const actor = currentActor();
             const pack = actor && actor.pack ? actor.pack : [];
             const retreatSlot = save.run && save.run.siteId ? pack.length : -1;
-            setText(panelTitleEl, "PACK " + pack.length + "/" + PD.PACK_MAX + (actor ? " · HP " + actor.hp + "/" + actor.maxHp : ""));
+            panelTitleEl.textContent = "PACK " + pack.length + "/" + PD.PACK_MAX + (actor ? " · HP " + actor.hp + "/" + actor.maxHp : "");
             if (!pack.length && retreatSlot < 0) {
-                setText(panelBodyEl, "EMPTY");
-                setText(panelMetaEl, "SIDE TO CLOSE");
+                panelBodyEl.textContent = "EMPTY";
+                panelMetaEl.textContent = "CLICK TO CLOSE";
             } else {
-                setText(panelBodyEl, pack.map(function (id, i) {
+                panelBodyEl.textContent = pack.map(function (id, i) {
                     const info = (PD.ITEM_INFO && PD.ITEM_INFO[id]) || { name: id.toUpperCase(), effect: "" };
                     const isGear = PD.GEAR_DEFS && !!PD.GEAR_DEFS[id];
                     const suffix = isGear ? " · EQUIP" : (info.effect ? " (" + info.effect + ")" : "");
                     return (i === invIndex ? "> " : "  ") + info.name + suffix;
-                }).concat(retreatSlot >= 0 ? [(invIndex === retreatSlot ? "> " : "  ") + "«RETREAT TO TOWN»"] : []).join("\n"));
-                setText(panelMetaEl, retreatSlot >= 0 && invIndex === retreatSlot
-                    ? "SIDE: RETREAT · KEEPS GOLD + XP"
-                    : "SIDE: USE/EQUIP · HOLD: CLOSE");
+                }).concat(retreatSlot >= 0 ? [(invIndex === retreatSlot ? "> " : "  ") + "«RETREAT TO TOWN»"] : []).join("\n");
+                panelMetaEl.textContent = retreatSlot >= 0 && invIndex === retreatSlot
+                    ? "CLICK: RETREAT · KEEPS GOLD + XP"
+                    : "CLICK: USE / EQUIP · ESC: CLOSE";
             }
-            setText(hintEl, "scroll: slot · side: use · hold: close");
+            hintEl.textContent = "wheel: slot · click: use · esc: close";
         } else if (mode === "dead") {
-            setText(panelTitleEl, "YOU WAKE");
-            setText(panelBodyEl, deathLine || "THE DUNGEON SPITS YOU OUT.");
-            setText(panelMetaEl, "SIDE TO RISE");
-            setText(hintEl, "side: town");
+            panelTitleEl.textContent = "YOU WAKE";
+            panelBodyEl.textContent = deathLine || "THE DUNGEON SPITS YOU OUT.";
+            panelMetaEl.textContent = "CLICK TO RISE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "win") {
-            setText(panelTitleEl, "THE ROAD OPENS");
-            setText(panelBodyEl, winLine || (WORLD.endings && WORLD.endings.hold) || PD.cannedWinLine());
-            setText(panelMetaEl, "SIDE TO KEEPGATE");
-            setText(hintEl, "side: town");
+            panelTitleEl.textContent = "THE ROAD OPENS";
+            panelBodyEl.textContent = winLine || (WORLD.endings && WORLD.endings.hold) || PD.cannedWinLine();
+            panelMetaEl.textContent = "CLICK TO KEEPGATE";
+            hintEl.textContent = "click/enter: continue";
         } else if (mode === "play" && save.run) {
             const abilities = { knight: "GUARD", scout: "DISARM", mage: "SPELL" };
             const ability = abilities[save.run.classId] || "ABILITY";
@@ -876,12 +950,40 @@
             if (save.run.classId === "scout" && !save.run.firstStrikeUsed) statuses.push("1ST STRIKE READY");
             if (save.run.poisonTurns > 0) statuses.push("POISON " + save.run.poisonTurns);
             const status = statuses.length ? " [" + statuses.join(" · ") + "]" : "";
-            const combatHint = room && room.enemies && room.enemies.length ? " · " + descriptions[save.run.classId] : "";
-            const hazardHint = room && room.hazard === "blood" ? " · BLOOD DRAINS ON MOVE" : (room && room.hazard === "reinforced" ? " · REINFORCED FOES" : "");
-            const choiceHint = choice && choice.active && save.run.floor >= 6 ? " · RISK: BLOOD FRENZY" : "";
-            setText(hintEl, reward && reward.active && !reward.choice
-                ? rewardBoss + " REWARD: " + rewardName + " (" + rewardDesc + ") · side: take"
-                : "tap: go · side: wait · hold: pack · Q: " + ability + theme + hazardHint + combatHint + status + (choice && choice.active ? " · S:safe R:risk" : "") + choiceHint);
+            const combatHint = room && room.enemies && room.enemies.length ? descriptions[save.run.classId] : "";
+            const hazardHint = room && room.hazard === "blood" ? "BLOOD DRAINS ON MOVE" : (room && room.hazard === "reinforced" ? "REINFORCED FOES" : "");
+            const choiceHint = choice && choice.active && save.run.floor >= 6 ? "RISK ROUTE: +10G BLOOD FRENZY" : "";
+            if (reward && reward.active && !reward.choice) {
+                hintEl.textContent = rewardBoss + " REWARD: " + rewardName + " (" + rewardDesc + ")\nclick/enter: take · wheel: swap reward";
+                hintEl.classList.add("two-line");
+            } else {
+                const parts = [];
+                if (choice && choice.active) {
+                    parts.push("ROUTE: click=safe · wheel=risk");
+                }
+                if (status) {
+                    parts.push(status.replace(/^ /, ""));
+                }
+                if (hazardHint) {
+                    parts.push(hazardHint);
+                }
+                if (choiceHint) {
+                    parts.push(choiceHint);
+                }
+                if (combatHint) {
+                    parts.push(combatHint);
+                }
+                if (theme) {
+                    parts.push(theme.replace(/^ · /, ""));
+                }
+                let extras = parts.join(" · ");
+                while (extras.length > 34 && parts.length > 1) {
+                    parts.pop();
+                    extras = parts.join(" · ");
+                }
+                hintEl.textContent = "click: go · space: wait · esc: pack · Q: " + ability + (extras ? "\n" + extras : "");
+                hintEl.classList.add("two-line");
+            }
         }
         setStatus(hintEl ? hintEl.textContent : "");
     }
@@ -898,7 +1000,6 @@
         save.location = { kind: "site", id: siteId };
         mode = "play";
         invIndex = 0;
-        logLines = [PD.cannedRoomLine(save.run)];
         if (tier > 0) {
             const site = WORLD.sites[siteId];
             logLines.push("CONTRACT T" + tier + ": " + (site ? site.name : String(siteId).toUpperCase()));
@@ -1165,7 +1266,8 @@
             return;
         }
         if (mode === "travel") {
-            townIndex = (townIndex + delta + WORLD.TRAVEL_ORDER.length) % WORLD.TRAVEL_ORDER.length;
+            const rows = WORLD.travelOptions(save, save.location.id);
+            townIndex = (townIndex + delta + rows.length) % rows.length;
             render();
             return;
         }
@@ -1207,7 +1309,7 @@
             return;
         }
         if (mode === "bestiary") {
-            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "wraith", "ogre"];
+            const order = ["slime", "rat", "bat", "skeleton", "ghoul", "acolyte", "wraith", "ogre"];
             const known = save.meta.bestiary || {};
             const rows = order.filter(function (type) { return known[type]; });
             if (rows.length) {
@@ -1397,7 +1499,14 @@
                 return;
             }
             if (option.id === "road") {
-                townIndex = Math.max(0, WORLD.TRAVEL_ORDER.indexOf(save.location.id));
+                const roadRows = WORLD.travelOptions(save, save.location.id);
+                townIndex = 0;
+                for (let i = 0; i < roadRows.length; i += 1) {
+                    if (!roadRows[i].here) {
+                        townIndex = i;
+                        break;
+                    }
+                }
                 mode = "travel";
                 render();
                 return;
@@ -1447,12 +1556,19 @@
             return;
         }
         if (mode === "travel") {
-            const destination = WORLD.TRAVEL_ORDER[townIndex];
-            if (WORLD.canTravel(save, save.location.id, destination)) {
-                save.location = { kind: "town", id: destination };
-                save.hero.lastInn = destination;
+            const rows = WORLD.travelOptions(save, save.location.id);
+            const dest = rows[townIndex];
+            if (dest && dest.here) {
+                returnToTown();
+                return;
+            }
+            if (dest && dest.open) {
+                const destName = (WORLD.towns[dest.id] && WORLD.towns[dest.id].name) || String(dest.id).toUpperCase();
+                save.location = { kind: "town", id: dest.id };
+                save.hero.lastInn = dest.id;
                 mode = "town";
                 townIndex = 0;
+                shopNote = "ROAD TO " + destName + " · HP + GOLD KEPT";
             }
             saveState();
             render();
@@ -1527,6 +1643,8 @@
                 save.flags = result.state.flags;
                 save.hero = result.state.hero || save.hero;
                 save.meta = result.state.meta || save.meta;
+            } else if (result && result.reason) {
+                shopNote = result.reason + " · FREE A PACK SLOT";
             }
             mode = "town";
             townIndex = 0;

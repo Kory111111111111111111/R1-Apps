@@ -1,6 +1,28 @@
 (function (global) {
     const TRAVEL_ORDER = ["ashford", "saltmere", "keepgate"];
 
+    const travelEdges = {
+        ashford: ["saltmere"],
+        saltmere: ["ashford", "keepgate"],
+        keepgate: ["saltmere"]
+    };
+
+    // Which towns sit behind a flag-gated road, and what a traveler must do to open it.
+    const roadGates = {
+        saltmere: {
+            unlock: "ashford_cellar_clear",
+            open: "ashford_cellar_open",
+            openStep: "TALK TO THE ELDER",
+            clearStep: "CLEAR THE CELLAR"
+        },
+        keepgate: {
+            unlock: "saltmere_crypt_clear",
+            open: "saltmere_crypt_open",
+            openStep: "TALK TO THE HARBOR",
+            clearStep: "CLEAR THE CRYPT"
+        }
+    };
+
     const towns = {
         ashford: {
             id: "ashford",
@@ -96,6 +118,7 @@
     const dialogue = {
         elder: {
             name: "ELDER",
+            role: "KNOWS THE ROAD EAST",
             nodes: [
                 {
                     ifAll: ["ashford_cellar_clear"],
@@ -119,6 +142,7 @@
         },
         miller: {
             name: "MILLER",
+            role: "OWNS THE MILL",
             nodes: [
                 {
                     ifAll: ["ashford_cellar_clear"],
@@ -141,6 +165,7 @@
         },
         harbor: {
             name: "HARBOR-MASTER",
+            role: "GUARDS THE QUAY",
             nodes: [
                 {
                     ifAll: ["saltmere_crypt_clear"],
@@ -163,6 +188,7 @@
         },
         smuggler: {
             name: "SMUGGLER",
+            role: "DEALS IN SECRETS",
             nodes: [
                 {
                     ifAll: ["saltmere_token_kept"],
@@ -186,6 +212,7 @@
         },
         warden: {
             name: "WARDEN",
+            role: "HOLDS THE GATE",
             nodes: [
                 {
                     ifAll: ["keepgate_hold_clear"],
@@ -222,6 +249,7 @@
         },
         priest: {
             name: "PRIEST",
+            role: "MARKS THE MAIL",
             nodes: [
                 {
                     ifAll: ["keepgate_blessed"],
@@ -313,6 +341,10 @@
         if (!choice) {
             return { ok: false, state: state };
         }
+        const heroPack = state.hero && state.hero.pack ? state.hero.pack : [];
+        if (choice.give && heroPack.length >= 5) {
+            return { ok: false, reason: "PACK FULL", state: state };
+        }
         const nextFlags = Object.assign({}, state.flags || {});
         if (choice.set) {
             nextFlags[choice.set] = 1;
@@ -344,11 +376,7 @@
         if (from === to && towns[to]) {
             return true;
         }
-        const edges = {
-            ashford: ["saltmere"],
-            saltmere: ["ashford", "keepgate"],
-            keepgate: ["saltmere"]
-        };
+        const edges = travelEdges;
         if (!edges[from] || edges[from].indexOf(to) === -1) {
             return false;
         }
@@ -373,6 +401,71 @@
         return name;
     }
 
+    function roadBlocker(state, destId) {
+        const gate = roadGates[destId];
+        if (!gate) {
+            return null;
+        }
+        if (flag(state, gate.unlock)) {
+            return null;
+        }
+        return flag(state, gate.open) ? gate.clearStep : gate.openStep;
+    }
+
+    // Road list for the travel screen: only the town you are in and towns joined by
+    // a direct road, each marked HERE / OPEN / BARRED so availability is never guesswork.
+    function travelOptions(state, from) {
+        const reach = travelEdges[from] || [];
+        return TRAVEL_ORDER.filter(function (id) {
+            return id === from || reach.indexOf(id) !== -1;
+        }).map(function (id) {
+            const town = towns[id];
+            const edge = reach.indexOf(id) !== -1;
+            return {
+                id: id,
+                name: (town && town.name) || String(id).toUpperCase(),
+                here: id === from,
+                open: edge && canTravel(state, from, id),
+                barred: edge && !canTravel(state, from, id)
+            };
+        });
+    }
+
+    // Short "what should I be doing right now" line for the current town, or null.
+    function townGoal(state) {
+        if (!state || !state.location || !state.location.id || !towns[state.location.id]) {
+            return null;
+        }
+        const townId = state.location.id;
+        const siteOpen = Object.keys(sites).find(function (id) {
+            const s = sites[id];
+            return s.town === townId && flag(state, s.unlock) && !flag(state, s.clear);
+        });
+        if (siteOpen) {
+            const words = { cellar: "CLEAR THE CELLAR", crypt: "CLEAR THE CRYPT", hold: "ENTER THE HOLD" };
+            return words[siteOpen] || ("CLEAR THE " + String(siteOpen).toUpperCase());
+        }
+        const fwdDest = { ashford: "saltmere", saltmere: "keepgate", keepgate: null }[townId];
+        const forwardOpen = fwdDest && roadGates[fwdDest] && flag(state, roadGates[fwdDest].unlock);
+        if (forwardOpen) {
+            return "ROAD EAST OPEN";
+        }
+        if (townId === "ashford") {
+            return "SEE THE ELDER";
+        }
+        if (townId === "saltmere") {
+            return "SEE THE HARBOR";
+        }
+        if (flag(state, "keepgate_hold_clear")) {
+            return "THE ROAD IS OPEN";
+        }
+        return "SEE THE WARDEN";
+    }
+
+    function npcRole(npcId) {
+        return (dialogue[npcId] && dialogue[npcId].role) || "";
+    }
+
     function availableSites(state, townId) {
         return Object.keys(sites).filter(function (id) {
             const site = sites[id];
@@ -394,17 +487,25 @@
         if (town.services.indexOf("shrine") !== -1) {
             options.push({ id: "shrine", label: "SHRINE" });
         }
-        options.push({ id: "road", label: "ROAD" });
+        const fwdGates = { ashford: "saltmere", saltmere: "keepgate", keepgate: null };
+        const fwd = fwdGates[townId];
+        let roadLabel = "ROAD";
+        if (fwd && roadGates[fwd]) {
+            roadLabel = flag(state, roadGates[fwd].unlock) ? "ROAD · EAST OPEN" : "ROAD · EAST BARRED";
+        }
+        options.push({ id: "road", label: roadLabel });
         const clearedSite = contractTarget(state, townId);
-        const openSite = Object.keys(sites).some(function (id) {
+        const openSite = Object.keys(sites).find(function (id) {
             return sites[id].town === townId && flag(state, sites[id].unlock) && !flag(state, sites[id].clear);
         });
         if (openSite) {
-            options.push({ id: "site", label: "SITE" });
+            const siteNames = { cellar: "CELLAR", crypt: "CRYPT", hold: "HOLD" };
+            options.push({ id: "site", label: "SITE · " + (siteNames[openSite] || String(openSite).toUpperCase()) });
         } else if (clearedSite) {
             options.push({ id: "contract", label: "CONTRACT T" + (contractTier(state, clearedSite) + 1) });
         }
-        options.push({ id: "pack", label: "PACK" });
+        const packLen = state && state.hero && state.hero.pack ? state.hero.pack.length : 0;
+        options.push({ id: "pack", label: packLen ? "PACK " + packLen + "/5" : "PACK" });
         options.push({ id: "hero", label: "HERO" });
         options.push({ id: "journal", label: "JOURNAL" });
         options.push({ id: "help", label: "HELP" });
@@ -567,10 +668,14 @@
         endings: endings,
         TRAVEL_ORDER: TRAVEL_ORDER,
         npcName: npcName,
+        npcRole: npcRole,
         getDialogue: getDialogue,
         advanceDialogue: advanceDialogue,
         canTravel: canTravel,
         travelLabel: travelLabel,
+        roadBlocker: roadBlocker,
+        travelOptions: travelOptions,
+        townGoal: townGoal,
         availableSites: availableSites,
         contractTarget: contractTarget,
         contractTier: contractTier,

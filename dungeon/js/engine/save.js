@@ -98,7 +98,16 @@
                     ai: PD.ENEMY_DEFS[e.type].ai || "slow",
                     heavyCooldown: Math.max(0, Math.round(Number(e.heavyCooldown) || 0)),
                     heavyTelegraph: !!e.heavyTelegraph,
-                    windup: Math.max(0, Math.min(1, Math.round(Number(e.windup) || 0)))
+                    heavyTargetX: PD.optionalCoordinate(e.heavyTargetX),
+                    heavyTargetY: PD.optionalCoordinate(e.heavyTargetY),
+                    windup: Math.max(0, Math.min(1, Math.round(Number(e.windup) || 0))),
+                    huntTargetX: PD.optionalCoordinate(e.huntTargetX),
+                    huntTargetY: PD.optionalCoordinate(e.huntTargetY),
+                    castWindup: Math.max(0, Math.min(1, Math.round(Number(e.castWindup) || 0))),
+                    castTargetX: PD.optionalCoordinate(e.castTargetX),
+                    castTargetY: PD.optionalCoordinate(e.castTargetY),
+                    rewarded: !!e.rewarded,
+                    reinforced: !!e.reinforced
                 });
             });
         }
@@ -114,15 +123,16 @@
                 };
             }
         }
-        const kind = raw.kind === "start" || raw.kind === "stairs" || raw.kind === "branch" ? raw.kind : "hall";
+        const kind = raw.kind === "start" || raw.kind === "stairs" || raw.kind === "branch" || raw.kind === "sanctum" ? raw.kind : "hall";
         return {
             id: typeof raw.id === "number" ? raw.id : index,
             kind: kind,
             tiles: tiles,
             doors: doors,
-            enemies: enemies,
+            enemies: PD.repairEnemyPlacements(tiles, enemies),
             chest: chest,
-            reward: raw.reward && typeof raw.reward === "object" ? { active: !!raw.reward.active, boss: typeof raw.reward.boss === "string" ? raw.reward.boss : "", choice: typeof raw.reward.choice === "string" ? raw.reward.choice : null, options: Array.isArray(raw.reward.options) ? raw.reward.options.filter(function (id) { return id === "gold" || id === "heal" || id === "renown"; }) : null, boon: typeof raw.reward.boon === "string" ? raw.reward.boon : null } : null,
+            sanctumUsed: !!raw.sanctumUsed,
+            reward: raw.reward && typeof raw.reward === "object" ? { active: !!raw.reward.active, boss: typeof raw.reward.boss === "string" ? raw.reward.boss : "", choice: typeof raw.reward.choice === "string" ? raw.reward.choice : null, preview: typeof raw.reward.preview === "string" ? raw.reward.preview : null, options: Array.isArray(raw.reward.options) ? raw.reward.options.filter(function (id) { return id === "gold" || id === "heal" || id === "renown"; }) : null, boon: typeof raw.reward.boon === "string" ? raw.reward.boon : null } : null,
             choice: raw.choice && typeof raw.choice === "object" ? { active: !!raw.choice.active, safe: !!raw.choice.safe, route: raw.choice.route === "safe" || raw.choice.route === "risk" ? raw.choice.route : null, safeTile: { x: 2, y: 3 }, riskTile: { x: 4, y: 3 } } : null,
             theme: typeof raw.theme === "string" ? raw.theme.slice(0, 32) : "DARK STONE",
             hazard: raw.hazard === "reinforced" || raw.hazard === "blood" ? raw.hazard : null
@@ -149,6 +159,29 @@
         }
         const roomId = PD.clamp(Math.round(Number(raw.roomId) || 0), 0, rooms.length - 1);
         const facing = PD.FACINGS.indexOf(raw.facing) !== -1 ? raw.facing : "S";
+        let heroX = PD.clamp(Math.round(Number(raw.x) || 3), 0, PD.MAP_SIZE - 1);
+        let heroY = PD.clamp(Math.round(Number(raw.y) || 3), 0, PD.MAP_SIZE - 1);
+        const heroRoom = rooms[roomId];
+        if (heroRoom && !PD.tileIsWalkable(heroRoom.tiles, heroX, heroY)) {
+            heroX = 3;
+            heroY = 3;
+            if (!PD.tileIsWalkable(heroRoom.tiles, heroX, heroY)) {
+                for (let sy = 1; sy < PD.MAP_SIZE - 1; sy += 1) {
+                    let placed = false;
+                    for (let sx = 1; sx < PD.MAP_SIZE - 1; sx += 1) {
+                        if (PD.tileIsWalkable(heroRoom.tiles, sx, sy)) {
+                            heroX = sx;
+                            heroY = sy;
+                            placed = true;
+                            break;
+                        }
+                    }
+                    if (placed) {
+                        break;
+                    }
+                }
+            }
+        }
         const pack = Array.isArray(raw.pack)
             ? raw.pack.filter(function (id) {
                 return PD.ITEM_IDS.indexOf(id) !== -1;
@@ -173,8 +206,8 @@
             gearHp: Math.max(0, Math.round(Number(raw.gearHp) || 0)),
             contract: Math.max(0, Math.round(Number(raw.contract) || 0)),
             facing: facing,
-            x: PD.clamp(Math.round(Number(raw.x) || 3), 0, PD.MAP_SIZE - 1),
-            y: PD.clamp(Math.round(Number(raw.y) || 3), 0, PD.MAP_SIZE - 1),
+            x: heroX,
+            y: heroY,
             roomId: roomId,
             rooms: rooms,
             rngState: (Number(raw.rngState) || 0) >>> 0,
@@ -431,6 +464,55 @@
         save.flags = Object.assign({}, save.flags || {}, { keepgate_hold_clear: 1 });
     }
 
+    global.PocketDungeon = global.PocketDungeon || {};
+    global.PocketDungeon.CLASSES = PD.CLASSES;
+    global.PocketDungeon.CLASS_ORDER = PD.CLASS_ORDER;
+    global.PocketDungeon.ITEM_INFO = PD.ITEM_INFO;
+    global.PocketDungeon.ENEMY_DEFS = PD.ENEMY_DEFS;
+    global.PocketDungeon.PACK_MAX = PD.PACK_MAX;
+    global.PocketDungeon.MAX_FLOOR = PD.MAX_FLOOR;
+    global.PocketDungeon.newSeed = PD.newSeed;
+    global.PocketDungeon.createRng = PD.createRng;
+    global.PocketDungeon.makeEnemy = PD.makeEnemy;
+    global.PocketDungeon.LEVEL_CAP = PD.LEVEL_CAP;
+    global.PocketDungeon.xpForNext = PD.xpForNext;
+    global.PocketDungeon.levelGains = PD.levelGains;
+    global.PocketDungeon.grantXp = PD.grantXp;
+    global.PocketDungeon.grantXpToHero = PD.grantXpToHero;
+    global.PocketDungeon.GEAR_SLOTS = PD.GEAR_SLOTS;
+    global.PocketDungeon.GEAR_DEFS = PD.GEAR_DEFS;
+    global.PocketDungeon.gearBonus = PD.gearBonus;
+    global.PocketDungeon.normalizeGear = PD.normalizeGear;
+    global.PocketDungeon.enemyXp = PD.enemyXp;
+    global.PocketDungeon.killEnemy = PD.killEnemy;
+    global.PocketDungeon.stripRunGear = PD.stripRunGear;
+    global.PocketDungeon.syncHeroFromRun = PD.syncHeroFromRun;
+    global.PocketDungeon.generateFloor = PD.generateFloor;
+    global.PocketDungeon.createRun = PD.createRun;
+    global.PocketDungeon.createHero = createHero;
+    global.PocketDungeon.createSiteRun = PD.createSiteRun;
+    global.PocketDungeon.cycleFacing = PD.cycleFacing;
+    global.PocketDungeon.faceTile = PD.faceTile;
+    global.PocketDungeon.pathTo = PD.pathTo;
+    global.PocketDungeon.tryAct = PD.tryAct;
+    global.PocketDungeon.waitTurn = PD.waitTurn;
+    global.PocketDungeon.chooseRoomRoute = PD.chooseRoomRoute;
+    global.PocketDungeon.claimReward = PD.claimReward;
+    global.PocketDungeon.hasCharm = PD.hasCharm;
+    global.PocketDungeon.useAbility = PD.useAbility;
+    global.PocketDungeon.useItem = PD.useItem;
+    global.PocketDungeon.useItemOnHero = PD.useItemOnHero;
+    global.PocketDungeon.cannedRoomLine = PD.cannedRoomLine;
+    global.PocketDungeon.cannedDeathLine = PD.cannedDeathLine;
+    global.PocketDungeon.cannedWinLine = PD.cannedWinLine;
+    global.PocketDungeon.getDrawState = PD.getDrawState;
+    global.PocketDungeon.facingName = PD.facingName;
+    global.PocketDungeon.createEmptySave = createEmptySave;
+    global.PocketDungeon.applySnapshot = applySnapshot;
+    global.PocketDungeon.snapshot = snapshot;
+    global.PocketDungeon.recordDeath = recordDeath;
+    global.PocketDungeon.recordWin = recordWin;
+    global.PocketDungeon.currentRoom = PD.currentRoom;
 
     PD.cloneJson = cloneJson;
     PD.snapshotRun = snapshotRun;

@@ -2,6 +2,69 @@
     /* Turn resolution: movement, pathfinding, enemy AI, abilities, rewards, chests, items. */
     const PD = global.PocketDungeon = global.PocketDungeon || {};
 
+    function killEnemy(run, room, enemy, logs) {
+        if (!enemy || enemy.hp > 0 || enemy.rewarded) {
+            return false;
+        }
+        enemy.rewarded = true;
+        const name = PD.enemyName(enemy.type);
+        logs.push(name + " DOWN");
+        const dropGold = enemy.gold || (PD.ENEMY_DEFS[enemy.type] && PD.ENEMY_DEFS[enemy.type].gold) || 0;
+        if (dropGold > 0) {
+            run.gold += dropGold;
+            logs.push("+" + dropGold + " GOLD");
+        }
+        run.kills = (run.kills || 0) + 1;
+        run.slainTypes = run.slainTypes || {};
+        run.slainTypes[enemy.type] = (run.slainTypes[enemy.type] || 0) + 1;
+        const xp = PD.enemyXp(enemy);
+        if (xp > 0) {
+            logs.push("+" + xp + " XP");
+            PD.grantXp(run, xp, logs);
+        }
+        if (PD.hasCharm(run, "drain_charm") && run.hp > 0 && run.hp < run.maxHp) {
+            run.hp = PD.clamp(run.hp + 1, 0, run.maxHp);
+            logs.push("DRAIN +1");
+        }
+        if (room) {
+            enemy.rewarded = true;
+            room.enemies = room.enemies.filter(function (e) {
+                return e.hp > 0;
+            });
+            if ((enemy.type === "wraith" || enemy.type === "ogre") && room.kind === "stairs") {
+                room.reward = {
+                    active: true,
+                    boss: enemy.type,
+                    choice: null,
+                    options: enemy.type === "ogre" ? ["gold", "heal", "renown"] : ["heal", "gold", "renown"],
+                    boon: enemy.type === "ogre" ? "lastStand" : "phaseStep"
+                };
+                logs.push("REWARD AWAITS");
+            }
+        }
+        return true;
+    }
+
+    function pickLoot(rng) {
+        const roll = rng.int(1, 100);
+        if (roll <= 45) {
+            return "potion";
+        }
+        if (roll <= 65) {
+            return "coin";
+        }
+        if (roll <= 78) {
+            return "blade";
+        }
+        if (roll <= 88) {
+            return "mail";
+        }
+        if (roll <= 96) {
+            return "greater_potion";
+        }
+        return "shield";
+    }
+
     function cycleFacing(run, delta) {
         const i = PD.FACINGS.indexOf(run.facing);
         const idx = i < 0 ? 0 : i;
@@ -35,7 +98,7 @@
         if (tile === "$" || tile === "+" || tile === ">") {
             return isDest;
         }
-        return tile === "." || tile === "^" || tile === "~";
+        return tile === "." || tile === "^" || tile === "~" || tile === "S" || tile === "R" || tile === "!";
     }
 
     function pathTo(run, tx, ty) {
@@ -146,7 +209,7 @@
                 logs.push("COUNTER " + counter);
                 if (enemy.hp <= 0) {
                     enemy.hp = 0;
-                    PD.killEnemy(run, PD.currentRoom(run), enemy, logs);
+                    killEnemy(run, PD.currentRoom(run), enemy, logs);
                 }
             }
         }
@@ -192,47 +255,127 @@
         if (enemy.windup > 0) {
             enemy.windup -= 1;
             enemy.telegraph = true;
-            logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " HUNTS");
             if (enemy.windup === 0) {
-                attackHero(run, enemy, rng, logs);
+                const targetHeld = run.x === enemy.huntTargetX && run.y === enemy.huntTargetY;
+                enemy.huntTargetX = null;
+                enemy.huntTargetY = null;
+                if (targetHeld) {
+                    logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " LUNGES");
+                    attackHero(run, enemy, rng, logs);
+                } else {
+                    logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " HUNT MISSES");
+                }
+            } else {
+                logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " HUNTS");
             }
             return;
         }
         if (enemy.heavyTelegraph) {
             const heavy = enemy.type === "ogre" ? 4 : 3;
-                const boonHeavy = run.lastStand > 0;
-            const guardedHeavy = boonHeavy ? 0 : (run.guardTurns > 0 ? Math.max(0, Math.floor(heavy / 2)) : heavy);
-            run.hp = PD.clamp(run.hp - guardedHeavy, 0, run.maxHp);
+            const targetHeld = run.x === enemy.heavyTargetX && run.y === enemy.heavyTargetY;
+            enemy.heavyTelegraph = false;
+            enemy.heavyTargetX = null;
+            enemy.heavyTargetY = null;
+            enemy.heavyCooldown = PD.BOSS_HEAVY_COOLDOWN;
+            if (!targetHeld) {
+                logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " SMASH MISSES");
+                return;
+            }
+            const guarded = run.guardTurns > 0;
+            const boonHeavy = run.lastStand > 0;
+            const damage = boonHeavy ? 0 : (guarded ? Math.max(0, Math.floor(heavy / 2)) : heavy);
+            run.hp = PD.clamp(run.hp - damage, 0, run.maxHp);
             if (boonHeavy) {
                 run.lastStand -= 1;
                 logs.push("LAST STAND HOLDS");
             }
-            if (run.guardTurns > 0) run.guardTurns = 0;
-            logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " SMASH " + guardedHeavy);
-            enemy.heavyTelegraph = false;
-            enemy.heavyCooldown = PD.BOSS_HEAVY_COOLDOWN;
+            if (guarded) {
+                run.guardTurns = 0;
+                logs.push("GUARD BREAKS");
+            }
+            logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " SMASH " + damage);
+            return;
+        }
+        if (enemy.castWindup > 0) {
+            enemy.castWindup -= 1;
+            enemy.telegraph = true;
+            if (enemy.castWindup === 0) {
+                const dxLine = Math.abs(run.x - enemy.x);
+                const dyLine = Math.abs(run.y - enemy.y);
+                const heldLine = (dxLine === 0 || dyLine === 0) && dxLine + dyLine <= 3;
+                enemy.castTargetX = null;
+                enemy.castTargetY = null;
+                if (heldLine) {
+                    const bolt = Math.max(1, (enemy.atk || 2) - 2);
+                    const guarded = run.guardTurns > 0;
+                    const damage = guarded ? Math.max(0, Math.floor(bolt / 2)) : bolt;
+                    run.hp = PD.clamp(run.hp - damage, 0, run.maxHp);
+                    logs.push("ACOLYTE BOLT " + damage);
+                    if (guarded) {
+                        run.guardTurns = 0;
+                        logs.push("GUARD BREAKS");
+                    }
+                } else {
+                    logs.push("ACOLYTE BOLT MISSES");
+                }
+            } else {
+                logs.push("ACOLYTE CHANTS");
+            }
             return;
         }
         if (dist === 1) {
+            if (enemy.type === "acolyte") {
+                const awayX = enemy.x + Math.sign(enemy.x - run.x);
+                const awayY = enemy.y + Math.sign(enemy.y - run.y);
+                if (!tryMoveStep(run, room, enemy, awayX, awayY)) {
+                    for (let i = 0; i < PD.FACINGS.length; i += 1) {
+                        const vec = PD.DIR[PD.FACINGS[i]];
+                        if (tryMoveStep(run, room, enemy, enemy.x + vec.x, enemy.y + vec.y)) {
+                            break;
+                        }
+                    }
+                }
+                logs.push("ACOLYTE BACKS AWAY");
+                return;
+            }
             if (enemy.type === "rat" && rng.int(1, 100) <= 25) {
                 const bite = Math.max(1, PD.hitDamage(enemy.atk, run.def, rng) - 1);
-                run.hp = PD.clamp(run.hp - bite, 0, run.maxHp);
+                const guardedBite = run.guardTurns > 0;
+                const biteDamage = guardedBite ? Math.max(0, Math.floor(bite / 2)) : bite;
+                run.hp = PD.clamp(run.hp - biteDamage, 0, run.maxHp);
+                if (guardedBite) {
+                    run.guardTurns = 0;
+                    logs.push("GUARD BREAKS");
+                    if (run.classId === "knight" && enemy.hp > 0) {
+                        const counter = Math.max(1, Math.floor(run.atk / 2));
+                        enemy.hp -= counter;
+                        logs.push("COUNTER " + counter);
+                        if (enemy.hp <= 0) {
+                            enemy.hp = 0;
+                            killEnemy(run, room, enemy, logs);
+                        }
+                    }
+                }
                 if (PD.hasCharm(run, "ward_charm")) {
-                    logs.push("RAT BITE " + bite + " · WARDED");
+                    logs.push("RAT BITE " + biteDamage + " · WARDED");
                 } else {
                     run.poisonTurns = Math.max(run.poisonTurns || 0, 2);
-                    logs.push("RAT BITE " + bite + " · DISEASE");
+                    logs.push("RAT BITE " + biteDamage + " · DISEASE");
                 }
                 return;
             }
             if (enemy.type === "ghoul" && enemy.windup <= 0 && rng.int(1, 100) <= 35) {
                 enemy.windup = 1;
+                enemy.huntTargetX = run.x;
+                enemy.huntTargetY = run.y;
                 enemy.telegraph = true;
                 logs.push("GHOUL HUNTS");
                 return;
             }
             if ((enemy.type === "ogre" || enemy.type === "wraith") && enemy.heavyCooldown <= 0) {
                 enemy.heavyTelegraph = true;
+                enemy.heavyTargetX = run.x;
+                enemy.heavyTargetY = run.y;
                 enemy.telegraph = true;
                 logs.push((PD.ENEMY_DEFS[enemy.type] || {}).name + " RAISES A BLOW");
                 return;
@@ -310,6 +453,30 @@
                 }
             }
             chaseHero(run, room, enemy, rng, 5);
+            return;
+        }
+        if (ai === "caster") {
+            const dxLine = run.x === enemy.x || run.y === enemy.y;
+            const ranged = dxLine && dist >= 2 && dist <= 3;
+            let clearLine = true;
+            if (ranged) {
+                const mx = enemy.x + Math.sign(run.x - enemy.x);
+                const my = enemy.y + Math.sign(run.y - enemy.y);
+                const midTile = PD.getTile(room, mx, my);
+                clearLine = midTile !== "#" && midTile !== "+" && midTile !== "$";
+            }
+            if (ranged && clearLine && rng.int(1, 100) <= 35) {
+                enemy.castWindup = 1;
+                enemy.castTargetX = run.x;
+                enemy.castTargetY = run.y;
+                enemy.telegraph = true;
+                logs.push("ACOLYTE CHANTS");
+                return;
+            }
+            if (dist > 4) {
+                return;
+            }
+            chaseHero(run, room, enemy, rng, 4);
             return;
         }
         chaseHero(run, room, enemy, rng, 4);
@@ -415,7 +582,11 @@
             logs.push("NO ROOM");
             return { ok: false, logs: logs };
         }
-        const vec = PD.DIR[run.facing];
+        if (run.hp <= 0) {
+            logs.push("DEAD");
+            return { ok: false, died: true, logs: logs };
+        }
+        const vec = PD.DIR[run.facing] || PD.DIR.S;
         const nx = run.x + vec.x;
         const ny = run.y + vec.y;
         const foe = PD.enemyAt(room, nx, ny);
@@ -431,7 +602,7 @@
             logs.push("HIT " + foeName + " " + dmg + (bonus ? " · FIRST STRIKE" : ""));
             if (foe.hp <= 0) {
                 foe.hp = 0;
-                PD.killEnemy(run, room, foe, logs);
+                killEnemy(run, room, foe, logs);
             }
             return finishTurn(run, rng, logs);
         }
@@ -445,10 +616,12 @@
             logs.push("IRON TRAP");
         }
         if (tile === "S" || tile === "R") {
+            run.x = nx;
+            run.y = ny;
             return chooseRoomRoute(run, tile === "S" ? "safe" : "risk");
         }
         if (tile === "#") {
-            if (run.classId === "mage" || run.phaseStep <= 0) {
+            if (run.classId === "mage" || run.phaseStep <= 0 || nx < 0 || ny < 0 || nx >= PD.MAP_SIZE || ny >= PD.MAP_SIZE) {
                 logs.push("BLOCKED");
                 PD.commitRng(run, rng);
                 return { ok: false, blocked: true, logs: logs };
@@ -457,6 +630,18 @@
             run.y = ny;
             run.phaseStep -= 1;
             logs.push("PHASE STEP");
+            return finishTurn(run, rng, logs);
+        }
+        if (tile === "!") {
+            if (room.sanctumUsed) {
+                logs.push("WELL IS DRY");
+            } else {
+                const amount = Math.max(1, Math.ceil(run.maxHp * 0.35));
+                const healed = Math.min(amount, run.maxHp - run.hp);
+                run.hp = PD.clamp(run.hp + amount, 0, run.maxHp);
+                room.sanctumUsed = true;
+                logs.push("SANCTUM REST +" + healed + " HP");
+            }
             return finishTurn(run, rng, logs);
         }
         if (tile === "$") {
@@ -497,6 +682,11 @@
             const siteLimit = run.maxSiteFloor || PD.MAX_FLOOR;
             const isHold = !run.siteId || run.siteId === "hold";
             if (run.floor === siteLimit && !isHold) {
+                if (room.enemies.some(function (enemy) { return enemy.hp > 0; })) {
+                    logs.push("FOES BAR THE WAY");
+                    PD.commitRng(run, rng);
+                    return { ok: false, logs: logs };
+                }
                 logs.push("SITE CLEAR");
                 PD.commitRng(run, rng);
                 return { ok: true, logs: logs, siteCleared: run.siteId, skipEnemies: true };
@@ -516,6 +706,11 @@
                 PD.commitRng(run, rng);
                 return { ok: false, logs: logs };
             }
+            if (room.enemies.some(function (enemy) { return enemy.hp > 0; })) {
+                logs.push("FOES BAR THE WAY");
+                PD.commitRng(run, rng);
+                return { ok: false, logs: logs };
+            }
             run.floor += 1;
             run.renown = (run.renown || 0) + 1;
             PD.generateFloor(run, rng);
@@ -526,13 +721,6 @@
             return { ok: true, logs: logs, floorChanged: true, roomChanged: true, skipEnemies: true };
         }
 
-        if (tile === "#" && run.phaseStep > 0) {
-            run.x = nx;
-            run.y = ny;
-            run.phaseStep -= 1;
-            logs.push("PHASE STEP");
-            return finishTurn(run, rng, logs);
-        }
         run.x = nx;
         run.y = ny;
         if (tile === "^") {
@@ -614,7 +802,7 @@
             logs.push("CAST " + enemyNameStr + " " + damage + " · RANGE " + hitDist);
             if (enemy.hp <= 0) {
                 enemy.hp = 0;
-                PD.killEnemy(run, room, enemy, logs);
+                killEnemy(run, room, enemy, logs);
                 if (rng.int(1, 100) <= 30) {
                     var secondEnemy = null;
                     for (var d2 = hitDist + 1; d2 <= 3; d2 += 1) {
@@ -628,7 +816,7 @@
                         logs.push("PIERCE " + PD.enemyName(secondEnemy.type) + " " + pierceDmg + " · ARCANE");
                         if (secondEnemy.hp <= 0) {
                             secondEnemy.hp = 0;
-                            PD.killEnemy(run, room, secondEnemy, logs);
+                            killEnemy(run, room, secondEnemy, logs);
                         }
                     }
                 }
@@ -659,7 +847,9 @@
             run.gold += 10;
             logs.push("RISK ROUTE +10 GOLD");
             if (!room.enemies.length) {
-                room.enemies.push(PD.makeEnemy(PD.pickEnemyType(run.floor, rng, run.enemyPool), 4, 3, run.floor, run.contract || 0));
+                const riskEnemy = PD.makeEnemy(PD.pickEnemyType(run.floor, rng, run.enemyPool), 4, 3, run.floor, run.contract || 0);
+                room.enemies.push(riskEnemy);
+                PD.reinforceEnemy(room, riskEnemy);
             }
             if (run.floor >= 6 && room.hazard === "blood") {
                 room.enemies.forEach(function (enemy) {
@@ -801,6 +991,8 @@
     }
 
 
+    PD.killEnemy = killEnemy;
+    PD.pickLoot = pickLoot;
     PD.cycleFacing = cycleFacing;
     PD.faceTile = faceTile;
     PD.canStepOnto = canStepOnto;

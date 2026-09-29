@@ -16,6 +16,9 @@
         if (room.kind === "stairs" && run.floor === PD.MAX_FLOOR && PD.ogreAlive(room)) {
             return "THE OGRE FILLS THE STAIRWELL.";
         }
+        if (room.kind === "sanctum") {
+            return room.sanctumUsed ? "THE WELL IS DRY." : "A COLD WELL WAITS IN THE STONE.";
+        }
         if (room.kind === "stairs" && PD.wraithAlive(room)) {
             return "A WRAITH HAUNTS THE STAIRS.";
         }

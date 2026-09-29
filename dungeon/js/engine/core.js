@@ -4,7 +4,9 @@
 
     const MAP_SIZE = 7;
     const MAX_FLOOR = 8;
+    const MAX_ROOMS = 8;
     const PACK_MAX = 5;
+    const ROOM_TILE_CHARS = ".#+>$^~SR!";
     const SNAPSHOT_VERSION = 3;
     const LEVEL_CAP = 30;
     const BOSS_HEAVY_COOLDOWN = 2;
@@ -56,6 +58,7 @@
         bat: { hp: 3, atk: 3, def: 0, debut: 2, gold: 3, xp: 4, ai: "erratic", name: "BAT" },
         skeleton: { hp: 6, atk: 3, def: 0, debut: 4, gold: 5, xp: 8, ai: "relentless", name: "SKELETON" },
         ghoul: { hp: 8, atk: 4, def: 0, debut: 4, gold: 6, xp: 10, ai: "patient", name: "GHOUL" },
+        acolyte: { hp: 6, atk: 4, def: 0, debut: 5, gold: 7, xp: 12, ai: "caster", name: "ACOLYTE" },
         ogre: { hp: 20, atk: 5, def: 1, debut: 8, gold: 30, xp: 60, ai: "ogre", name: "OGRE" },
         wraith: { hp: 14, atk: 4, def: 0, debut: 4, gold: 20, xp: 25, ai: "phase", name: "WRAITH" }
     };
@@ -86,6 +89,7 @@
         ward_charm: { name: "WARD CHARM", effect: "+2 HP · POISON IMMUNE", type: "gear", slot: "charm" },
         coin: { name: "COIN", effect: "+10 GOLD", type: "gold" }
     };
+
     let lastCryptoValue = -1;
     let cryptoRepeatStreak = 0;
 
@@ -164,6 +168,19 @@
 
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    function optionalCoordinate(value) {
+        const number = Number(value);
+        return Number.isInteger(number) && number >= 0 && number < MAP_SIZE ? number : null;
+    }
+
+    function boundedInt(value, fallback, min, max) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) {
+            return fallback;
+        }
+        return clamp(Math.round(number), min, max);
     }
 
     function xpForNext(level) {
@@ -311,21 +328,19 @@
         hero.def = base.def;
         hero.gold = Math.max(0, Math.round(Number(run.gold) || 0));
         hero.pack = Array.isArray(run.pack) ? run.pack.slice() : [];
-        // Return gear equipped during the run back to the pack so it is not silently
-        // lost, then drop any copy of the hero's persistent gear to avoid duplication.
-        if (run.gear) {
-            GEAR_SLOTS.forEach(function (slot) {
-                const id = run.gear[slot];
-                if (id && hero.pack.length < PACK_MAX) {
-                    hero.pack.push(id);
-                }
-            });
-        }
-        if (hero.gear) {
-            hero.pack = hero.pack.filter(function (id) {
-                return id !== hero.gear.weapon && id !== hero.gear.armor && id !== hero.gear.charm;
-            });
-        }
+        // Persistent equipment is already owned by the hero. Only return a changed
+        // run slot; replacement gear remains a real pack item after a retreat/death.
+        GEAR_SLOTS.forEach(function (slot) {
+            const persistentId = hero.gear && hero.gear[slot];
+            const runId = run.gear && run.gear[slot];
+            const persistentIndex = persistentId ? hero.pack.indexOf(persistentId) : -1;
+            if (persistentIndex !== -1) {
+                hero.pack.splice(persistentIndex, 1);
+            }
+            if (runId && runId !== persistentId && hero.pack.length < PACK_MAX) {
+                hero.pack.push(runId);
+            }
+        });
         hero.level = Math.max(1, Math.round(Number(run.level) || 1));
         hero.xp = Math.max(0, Math.round(Number(run.xp) || 0));
         return hero;
@@ -348,7 +363,7 @@
     }
 
     function currentRoom(run) {
-        return run.rooms[run.roomId];
+        return run && Array.isArray(run.rooms) ? run.rooms[run.roomId] : null;
     }
 
     function enemyAt(room, x, y) {
@@ -384,7 +399,9 @@
 
     PD.MAP_SIZE = MAP_SIZE;
     PD.MAX_FLOOR = MAX_FLOOR;
+    PD.MAX_ROOMS = MAX_ROOMS;
     PD.PACK_MAX = PACK_MAX;
+    PD.ROOM_TILE_CHARS = ROOM_TILE_CHARS;
     PD.SNAPSHOT_VERSION = SNAPSHOT_VERSION;
     PD.LEVEL_CAP = LEVEL_CAP;
     PD.BOSS_HEAVY_COOLDOWN = BOSS_HEAVY_COOLDOWN;
@@ -402,12 +419,16 @@
     PD.GEAR_DEFS = GEAR_DEFS;
     PD.ITEM_IDS = ITEM_IDS;
     PD.ITEM_INFO = ITEM_INFO;
+    PD.lastCryptoValue = lastCryptoValue;
+    PD.cryptoRepeatStreak = cryptoRepeatStreak;
     PD.cryptoUint32 = cryptoUint32;
     PD.newSeed = newSeed;
     PD.createRng = createRng;
     PD.rngFromRun = rngFromRun;
     PD.commitRng = commitRng;
     PD.clamp = clamp;
+    PD.optionalCoordinate = optionalCoordinate;
+    PD.boundedInt = boundedInt;
     PD.xpForNext = xpForNext;
     PD.levelGains = levelGains;
     PD.emptyGear = emptyGear;
