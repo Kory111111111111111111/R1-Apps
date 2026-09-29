@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pocket Dungeon Frame Benchmark</title>
+</head>
+<body>
+    <h1>Pocket Dungeon Frame Benchmark</h1>
+    <pre id="out">running...</pre>
+
+    <script src="../js/engine/core.js"></script>
+    <script src="../js/engine/worldgen.js"></script>
+    <script src="../js/engine/run.js"></script>
+    <script src="../js/engine/combat.js"></script>
+    <script src="../js/engine/narrative.js"></script>
+    <script src="../js/engine/save.js"></script>
+    <script src="../js/sprites.js"></script>
+    <script src="../js/world.js"></script>
+    <script>
+    (function () {
+        var PD = window.PocketDungeon;
+        var out = document.getElementById("out");
+        var TRIALS = 7;
+
+        function makeCtx() {
+            var c = document.createElement("canvas");
+            c.width = 224;
+            c.height = 224;
+            return c.getContext("2d", { willReadFrequently: false });
+        }
+
+        // A busy room: six live enemies, telegraphs, deep-floor tint.
+        function buildScene(run, floor) {
+            run.floor = floor;
+            var rng = PD.createRng(run.seed, 0);
+            PD.generateFloor(run, rng);
+            var room = PD.currentRoom(run);
+            var defs = Object.keys(PD.ENEMY_DEFS);
+            room.enemies.length = 0;
+            for (var i = 0; i < 6; i += 1) {
+                var e = PD.makeEnemy(defs[i % defs.length], 1 + (i % 5), 1 + Math.floor(i / 5), floor, 0);
+                e.hp = Math.max(1, Math.floor(e.maxHp * 0.6));
+                if (i === 2) { e.telegraph = true; }
+                if (i === 3) { e.telegraph = true; e.windup = true; }
+                if (i === 4) { e.telegraph = true; e.heavyTelegraph = true; }
+                room.enemies.push(e);
+            }
+            return PD.getDrawState(run);
+        }
+
+        // min-of-trials: the least-perturbed sample is the best estimator of
+        // intrinsic cost on a shared, noisy CI box.
+        function bench(label, fn, iters, warmup) {
+            for (var w = 0; w < warmup; w += 1) fn(w);
+            var best = Infinity;
+            var all = [];
+            for (var t = 0; t < TRIALS; t += 1) {
+                var t0 = performance.now();
+                for (var i = 0; i < iters; i += 1) fn(i);
+                var per = ((performance.now() - t0) / iters) * 1000;
+                all.push(+per.toFixed(2));
+                if (per < best) best = per;
+            }
+            all.sort(function (a, b) { return a - b; });
+            return { label: label, iters: iters, minUs: +best.toFixed(2), medianUs: all[Math.floor(all.length / 2)] };
+        }
+
+        var ctx = makeCtx();
+        PD.bakeAll();
+
+        var run = PD.createRun("knight", 424242);
+        var busy = buildScene(run, 8);
+        var mid = buildScene(run, 3);
+
+        var results = [];
+
+        // Steady state: the animation loop redraws an unchanged room every tick.
+        results.push(bench("drawRoom steady (unchanged room, FL8)", function (i) {
+            PD.drawRoom(ctx, busy, i & 1);
+        }, 3000, 1500));
+
+        results.push(bench("drawRoom steady (unchanged room, FL3)", function (i) {
+            PD.drawRoom(ctx, mid, i & 1);
+        }, 3000, 1500));
+
+        // Worst case: the tile grid changed, forcing a floor-layer repaint.
+        var mutated = busy.tiles.slice();
+        var flip = 0;
+        results.push(bench("drawRoom cold (tiles change every frame)", function (i) {
+            flip = (flip + 1) % 2;
+            mutated[3] = flip ? busy.tiles[3] : busy.tiles[3].slice(0, 0) + (busy.tiles[3].charAt(0) === "#" ? "." : "#") + busy.tiles[3].slice(1);
+            var st = { tiles: mutated, hero: busy.hero, enemies: busy.enemies, floor: 8 };
+            PD.drawRoom(ctx, st, i & 1);
+        }, 3000, 1500));
+
+        // The full per-frame path the render loop actually runs.
+        results.push(bench("fullFrame (getDrawState + drawRoom)", function (i) {
+            var st = PD.getDrawState(run);
+            PD.drawRoom(ctx, st, i & 1);
+        }, 3000, 1500));
+
+        results.push(bench("getDrawState", function () {
+            return PD.getDrawState(run);
+        }, 20000, 2000));
+
+        out.textContent = "BENCH_JSON_START" + JSON.stringify({ ok: true, results: results }) + "BENCH_JSON_END";
+    })();
+    </script>
+</body>
+</html>

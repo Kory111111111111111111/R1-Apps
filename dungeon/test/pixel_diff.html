@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>pixel diff</title></head>
+<body>
+<pre id="out">running</pre>
+<script>
+// Renders the same scenes with the ORIGINAL drawRoom (reconstructed here from
+// git HEAD) and with the CURRENT optimized one, then compares pixels exactly.
+function loadScript(src, done) {
+  var s = document.createElement("script");
+  s.src = src;
+  s.onload = done;
+  s.onerror = function () { done(new Error("load fail " + src)); };
+  document.head.appendChild(s);
+}
+
+window.__origErr = [];
+window.addEventListener("error", function (e) { window.__origErr.push(e.message); });
+
+var SPRITES_SRC = "../js/sprites.js";
+
+loadScript(SPRITES_SRC, function () {
+  var PD = window.PocketDungeon;
+  var TILE_PX = PD.TILE_PX;
+  var MAP_SIZE = PD.MAP_SIZE;
+  PD.bakeAll();
+  var getBaked = PD.getBaked;
+
+  // ---- the original implementation, verbatim from HEAD ----
+  function origTileId(ch) {
+    if (ch === "#") return "wall";
+    if (ch === "+") return "door";
+    if (ch === ">") return "stairs";
+    if (ch === "$") return "chest";
+    if (ch === "^") return "trap";
+    if (ch === "~") return "poison";
+    if (ch === "S") return "safe";
+    if (ch === "R") return "risk";
+    return "floor";
+  }
+  function origDrawFacing(ctx, tileX, tileY, facing) {
+    var x0 = tileX * TILE_PX, y0 = tileY * TILE_PX;
+    ctx.fillStyle = "#d4a017";
+    if (facing === "N") ctx.fillRect(x0 + 14, y0 + 1, 4, 3);
+    else if (facing === "E") ctx.fillRect(x0 + 28, y0 + 14, 3, 4);
+    else if (facing === "S") ctx.fillRect(x0 + 14, y0 + 28, 4, 3);
+    else ctx.fillRect(x0 + 1, y0 + 14, 3, 4);
+  }
+  function origDrawRoom(ctx, state, frame) {
+    var anim = frame ? 1 : 0;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = "#141210";
+    ctx.fillRect(0, 0, TILE_PX * MAP_SIZE, TILE_PX * MAP_SIZE);
+    var tiles = state && state.tiles ? state.tiles : [];
+    for (var y = 0; y < MAP_SIZE; y += 1) {
+      var row = tiles[y] || "";
+      for (var x = 0; x < MAP_SIZE; x += 1) {
+        var id = origTileId(row[x] || "#");
+        ctx.drawImage(getBaked("tile:" + id), x * TILE_PX, y * TILE_PX);
+      }
+    }
+    var enemies = (state && state.enemies) || [];
+    for (var i = 0; i < enemies.length; i += 1) {
+      var e = enemies[i];
+      if (!e || e.hp <= 0) continue;
+      if (e.telegraph) {
+        ctx.fillStyle = e.heavyTelegraph ? "#c44030" : (e.windup ? "#a080e8" : "#d4a017");
+        ctx.fillRect(e.x * TILE_PX + 12, e.y * TILE_PX + 1, e.heavyTelegraph ? 8 : (e.windup ? 6 : 4), 2);
+      }
+      ctx.drawImage(getBaked("enemy:" + e.type + ":" + anim), e.x * TILE_PX, e.y * TILE_PX);
+      var eMaxHp = e.maxHp || e.hp;
+      if (eMaxHp > 1 && e.hp < eMaxHp) {
+        var barW = TILE_PX - 6, barH = 2;
+        var barX = e.x * TILE_PX + 3, barY = e.y * TILE_PX + TILE_PX - 4;
+        ctx.fillStyle = "#3a0808";
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.fillStyle = "#c44030";
+        ctx.fillRect(barX, barY, Math.max(1, Math.round(barW * (e.hp / eMaxHp))), barH);
+      }
+    }
+    var hero = state && state.hero;
+    if (hero) {
+      ctx.drawImage(getBaked("hero:" + hero.classId + ":" + anim), hero.x * TILE_PX, hero.y * TILE_PX);
+      origDrawFacing(ctx, hero.x, hero.y, hero.facing);
+    }
+    var floorNum = state && state.floor ? Math.round(state.floor) : 1;
+    if (floorNum > 1) {
+      var alpha = Math.min(0.35, (floorNum - 1) * 0.05);
+      ctx.fillStyle = "rgba(8, 4, 12, " + alpha + ")";
+      ctx.fillRect(0, 0, TILE_PX * MAP_SIZE, TILE_PX * MAP_SIZE);
+    }
+  }
+
+  function mk() {
+    var c = document.createElement("canvas");
+    c.width = TILE_PX * MAP_SIZE;
+    c.height = TILE_PX * MAP_SIZE;
+    return c.getContext("2d");
+  }
+
+  // Build scenes covering every tile char, every floor tint, every facing,
+  // dead enemies, telegraph variants, missing tiles and no-hero.
+  var allChars = "#######+#>$^~SR..#";
+  var scenes = [];
+  for (var f = 1; f <= 8; f += 1) {
+    for (var variant = 0; variant < 6; variant += 1) {
+      var rows = [];
+      for (var y = 0; y < MAP_SIZE; y += 1) {
+        var r = "";
+        for (var x = 0; x < MAP_SIZE; x += 1) {
+          r += allChars.charAt((x + y * 3 + variant * 5) % allChars.length);
+        }
+        rows.push(r);
+      }
+      scenes.push({
+        tiles: rows,
+        floor: f,
+        hero: variant === 5 ? null : { x: variant % 7, y: (variant * 2) % 7, facing: ["N","E","S","W"][variant % 4], classId: ["knight","scout","mage"][variant % 3] },
+        enemies: [
+          { type: "slime", x: 1, y: 1, hp: 3, maxHp: 4 },
+          { type: "ogre", x: 2, y: 2, hp: 0, maxHp: 20 },
+          { type: "skeleton", x: 3, y: 3, hp: 5, maxHp: 6, telegraph: true },
+          { type: "wraith", x: 4, y: 4, hp: 9, maxHp: 9, telegraph: true, windup: true },
+          { type: "bat", x: 5, y: 5, hp: 2, maxHp: 3, telegraph: true, heavyTelegraph: true },
+          { type: "ghoul", x: 0, y: 6, hp: 1, maxHp: 1 }
+        ]
+      });
+    }
+  }
+  // degenerate inputs
+  scenes.push({ tiles: [], hero: null, enemies: [] });
+  scenes.push({ tiles: ["###"], hero: { x: 0, y: 0, facing: "W", classId: "mage" }, enemies: [] });
+  scenes.push({ tiles: ["#..#", "#..#"], hero: { x: 1, y: 1, facing: "N", classId: "scout" }, enemies: [{ type: "rat", x: 0, y: 0, hp: 1, maxHp: 3 }] });
+
+  var mismatches = [];
+  var checked = 0;
+  for (var s = 0; s < scenes.length; s += 1) {
+    for (var fr = 0; fr < 2; fr += 1) {
+      var a = mk(), b = mk();
+      origDrawRoom(a, scenes[s], fr);
+      PD.drawRoom(b, scenes[s], fr);
+      var da = a.getImageData(0, 0, a.canvas.width, a.canvas.height).data;
+      var db = b.getImageData(0, 0, b.canvas.width, b.canvas.height).data;
+      var diff = 0;
+      for (var p = 0; p < da.length; p += 4) {
+        if (da[p] !== db[p] || da[p+1] !== db[p+1] || da[p+2] !== db[p+2] || da[p+3] !== db[p+3]) diff += 1;
+      }
+      checked += 1;
+      if (diff !== 0) {
+        mismatches.push({ scene: s, frame: fr, diffPixels: diff });
+      }
+    }
+  }
+
+  // now the change-detection path: same scene drawn twice must be stable, and a
+  // mutated tile grid must invalidate the cache (chest opened -> floor shows).
+  var t1 = { tiles: ["#######","#..$..#","#.....#","#.....#","#.....#","#.....#","#######"], hero: {x:3,y:3,facing:"S",classId:"knight"}, enemies: [] };
+  var c1 = mk();
+  PD.drawRoom(c1, t1, 0);
+  var t2 = { tiles: t1.tiles.slice(), hero: t1.hero, enemies: [] };
+  t2.tiles[1] = t1.tiles[1].slice();
+  var c2 = mk();
+  PD.drawRoom(c2, t2, 0);
+  var stable = true;
+  var d1 = c1.getImageData(0,0,c1.canvas.width,c1.canvas.height).data;
+  var d2 = c2.getImageData(0,0,c2.canvas.width,c2.canvas.height).data;
+  for (var q = 0; q < d1.length; q += 4) {
+    if (d1[q] !== d2[q] || d1[q+1] !== d2[q+1] || d1[q+2] !== d2[q+2] || d1[q+3] !== d2[q+3]) { stable = false; break; }
+  }
+  // mutate the chest tile: cache must invalidate
+  t2.tiles[1] = t2.tiles[1].slice(0,3) + "." + t2.tiles[1].slice(4);
+  var c3 = mk();
+  PD.drawRoom(c3, t2, 0);
+  var d3 = c3.getImageData(0,0,c3.canvas.width,c3.canvas.height).data;
+  var invalidated = false;
+  for (var r2 = 0; r2 < d1.length; r2 += 4) {
+    if (d1[r2] !== d3[r2] || d1[r2+1] !== d3[r2+1] || d1[r2+2] !== d3[r2+2]) { invalidated = true; break; }
+  }
+  // and the original agrees with the post-mutation render too
+  var c4 = mk();
+  origDrawRoom(c4, t2, 0);
+  var d4 = c4.getImageData(0,0,c4.canvas.width,c4.canvas.height).data;
+  var afterMatch = true;
+  for (var z = 0; z < d1.length; z += 4) {
+    if (d4[z] !== d3[z] || d4[z+1] !== d3[z+1] || d4[z+2] !== d3[z+2] || d4[z+3] !== d3[z+3]) { afterMatch = false; break; }
+  }
+
+  var out = [
+    "scenes compared: " + checked,
+    "pixel mismatches: " + mismatches.length,
+    "stable on redraw: " + stable,
+    "cache invalidates on tile change: " + invalidated,
+    "post-change render matches original: " + afterMatch,
+    "page errors: " + JSON.stringify(window.__origErr)
+  ];
+  if (mismatches.length) out.push(JSON.stringify(mismatches.slice(0, 5)));
+  document.getElementById("out").textContent = "DIFF_START" + out.join("\n") + "DIFF_END";
+});
+</script>
+</body></html>

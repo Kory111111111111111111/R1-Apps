@@ -1,4 +1,5 @@
 (function (global) {
+    const PD = global.PocketDungeon = global.PocketDungeon || {};
     const SRC = 16;
     const SCALE = 2;
     const TILE_PX = SRC * SCALE;
@@ -874,6 +875,90 @@
         }
     }
 
+    /* The r1 screen is ~240x282 usable, so every drawImage and full-canvas fill
+     * is expensive. The tile grid is static between tile mutations (opening a
+     * chest, taking stairs, disarming a trap), yet it was re-blitting all 49
+     * tiles plus a background fill on every frame. The depth tint likewise only
+     * changes with floor. Both are now pre-rendered into cached layers:
+     *   - floor layer: repainted only when the tile rows actually change
+     *   - tint layer: baked once per alpha, composited as a single blit
+     * A 7-row string concat is a far cheaper change-detect than 49 tileId
+     * decodes plus 49 blits. Signature, look and draw order are unchanged. */
+    const CANVAS_PX = TILE_PX * MAP_SIZE;
+
+    let floorLayer = null;
+    let floorCtx = null;
+    let floorKey = null;
+    let tintLayer = null;
+    let tintKey = null;
+
+    // Tile character -> baked sprite id, resolved once instead of per tile per frame.
+    const TILE_IDS = (function () {
+        const map = Object.create(null);
+        const chs = "#+>$^~SR.";
+        const ids = ["wall", "door", "stairs", "chest", "trap", "poison", "safe", "risk", "floor"];
+        for (let i = 0; i < chs.length; i += 1) {
+            map[chs.charAt(i)] = ids[i];
+        }
+        return map;
+    })();
+
+    function makeLayer() {
+        const canvas = document.createElement("canvas");
+        canvas.width = CANVAS_PX;
+        canvas.height = CANVAS_PX;
+        return canvas;
+    }
+
+    function tilesKey(tiles) {
+        let key = "";
+        for (let y = 0; y < MAP_SIZE; y += 1) {
+            key += tiles[y] || "";
+        }
+        return key;
+    }
+
+    function ensureFloorLayer(tiles) {
+        const key = tilesKey(tiles);
+        if (floorKey === key && floorLayer) {
+            return;
+        }
+        if (!floorLayer) {
+            floorLayer = makeLayer();
+            floorCtx = floorLayer.getContext("2d");
+            floorCtx.imageSmoothingEnabled = false;
+        }
+        floorCtx.fillStyle = "#141210";
+        floorCtx.fillRect(0, 0, CANVAS_PX, CANVAS_PX);
+        for (let y = 0; y < MAP_SIZE; y += 1) {
+            const row = tiles[y] || "";
+            for (let x = 0; x < MAP_SIZE; x += 1) {
+                const ch = row[x] || "#";
+                floorCtx.drawImage(getBaked("tile:" + (TILE_IDS[ch] || "floor")), x * TILE_PX, y * TILE_PX);
+            }
+        }
+        floorKey = key;
+    }
+
+    function ensureTintLayer(floorNum) {
+        if (floorNum <= 1) {
+            return null;
+        }
+        const alpha = Math.min(0.35, (floorNum - 1) * 0.05);
+        const key = String(alpha);
+        if (tintKey !== key || !tintLayer) {
+            if (!tintLayer) {
+                tintLayer = makeLayer();
+            }
+            const c = tintLayer.getContext("2d");
+            c.clearRect(0, 0, CANVAS_PX, CANVAS_PX);
+            c.fillStyle = "rgba(8, 4, 12, " + alpha + ")";
+            c.fillRect(0, 0, CANVAS_PX, CANVAS_PX);
+            tintKey = key;
+        }
+        return tintLayer;
+    }
+
     function drawRoom(ctx, state, frame) {
         if (!ctx) {
             return;
@@ -883,17 +968,11 @@
         }
         const anim = frame ? 1 : 0;
         ctx.imageSmoothingEnabled = false;
-        ctx.fillStyle = "#141210";
-        ctx.fillRect(0, 0, TILE_PX * MAP_SIZE, TILE_PX * MAP_SIZE);
 
-        const tiles = state && state.tiles ? state.tiles : [];
-        for (let y = 0; y < MAP_SIZE; y += 1) {
-            const row = tiles[y] || "";
-            for (let x = 0; x < MAP_SIZE; x += 1) {
-                const id = tileId(row[x] || "#");
-                ctx.drawImage(getBaked("tile:" + id), x * TILE_PX, y * TILE_PX);
-            }
-        }
+        const tiles = (state && state.tiles) || [];
+        ensureFloorLayer(tiles);
+        // The opaque floor layer replaces the old background fillRect.
+        ctx.drawImage(floorLayer, 0, 0);
 
         const enemies = (state && state.enemies) || [];
         for (let i = 0; i < enemies.length; i += 1) {
@@ -901,21 +980,19 @@
             if (!enemy || enemy.hp <= 0) {
                 continue;
             }
+            const ex = enemy.x * TILE_PX;
+            const ey = enemy.y * TILE_PX;
             if (enemy.telegraph) {
                 ctx.fillStyle = enemy.heavyTelegraph ? "#c44030" : (enemy.windup ? "#a080e8" : "#d4a017");
-                ctx.fillRect(enemy.x * TILE_PX + 12, enemy.y * TILE_PX + 1, enemy.heavyTelegraph ? 8 : (enemy.windup ? 6 : 4), 2);
+                ctx.fillRect(ex + 12, ey + 1, enemy.heavyTelegraph ? 8 : (enemy.windup ? 6 : 4), 2);
             }
-            ctx.drawImage(
-                getBaked("enemy:" + enemy.type + ":" + anim),
-                enemy.x * TILE_PX,
-                enemy.y * TILE_PX
-            );
+            ctx.drawImage(getBaked("enemy:" + enemy.type + ":" + anim), ex, ey);
             var eMaxHp = enemy.maxHp || enemy.hp;
             if (eMaxHp > 1 && enemy.hp < eMaxHp) {
                 var barW = TILE_PX - 6;
                 var barH = 2;
-                var barX = enemy.x * TILE_PX + 3;
-                var barY = enemy.y * TILE_PX + TILE_PX - 4;
+                var barX = ex + 3;
+                var barY = ey + TILE_PX - 4;
                 ctx.fillStyle = "#3a0808";
                 ctx.fillRect(barX, barY, barW, barH);
                 ctx.fillStyle = "#c44030";
@@ -933,19 +1010,45 @@
             drawFacing(ctx, hero.x, hero.y, hero.facing);
         }
 
-        var floorNum = state && state.floor ? Math.round(state.floor) : 1;
-        if (floorNum > 1) {
-            var alpha = Math.min(0.35, (floorNum - 1) * 0.05);
-            ctx.fillStyle = "rgba(8, 4, 12, " + alpha + ")";
-            ctx.fillRect(0, 0, TILE_PX * MAP_SIZE, TILE_PX * MAP_SIZE);
+        const tint = ensureTintLayer(state && state.floor ? Math.round(state.floor) : 1);
+        if (tint) {
+            ctx.drawImage(tint, 0, 0);
         }
     }
 
-    global.PocketDungeon = global.PocketDungeon || {};
-    global.PocketDungeon.TILE_PX = TILE_PX;
-    global.PocketDungeon.MAP_SIZE = MAP_SIZE;
-    global.PocketDungeon.PALETTES = PALETTES;
-    global.PocketDungeon.bakeAll = bakeAll;
-    global.PocketDungeon.drawRoom = drawRoom;
-    global.PocketDungeon.getBaked = getBaked;
+    function getDrawState(run) {
+        const room = PD.currentRoom(run);
+        if (!room) {
+            return { tiles: PD.blankTiles(), hero: null, enemies: [] };
+        }
+        return {
+            tiles: room.tiles,
+            hero: {
+                x: run.x,
+                y: run.y,
+                facing: run.facing,
+                classId: run.classId
+            },
+            floor: run.floor,
+            enemies: room.enemies.map(function (e) {
+                return { type: e.type, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, telegraph: !!e.telegraph, heavyTelegraph: !!e.heavyTelegraph, windup: !!e.windup };
+            })
+        };
+    }
+
+    function facingName(facing) {
+        if (facing === "N") return "NORTH";
+        if (facing === "E") return "EAST";
+        if (facing === "S") return "SOUTH";
+        return "WEST";
+    }
+
+    PD.TILE_PX = TILE_PX;
+    PD.MAP_SIZE = MAP_SIZE;
+    PD.PALETTES = PALETTES;
+    PD.bakeAll = bakeAll;
+    PD.drawRoom = drawRoom;
+    PD.getBaked = getBaked;
+    PD.getDrawState = getDrawState;
+    PD.facingName = facingName;
 })(window);

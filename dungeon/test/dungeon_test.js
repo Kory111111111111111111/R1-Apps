@@ -15,9 +15,12 @@ const windowMock = {
 };
 global.window = windowMock;
 
-// Load dungeon.js
-const dungeonCode = fs.readFileSync(path.join(__dirname, "../js/dungeon.js"), "utf8");
-eval(dungeonCode);
+// Load the engine modules in dependency order
+const ENGINE = ["core", "worldgen", "run", "combat", "narrative", "save"];
+ENGINE.forEach(function (name) {
+    const code = fs.readFileSync(path.join(__dirname, "../js/engine/" + name + ".js"), "utf8");
+    eval(code);
+});
 const PD = windowMock.PocketDungeon;
 
 const worldCode = fs.readFileSync(path.join(__dirname, "../js/world.js"), "utf8");
