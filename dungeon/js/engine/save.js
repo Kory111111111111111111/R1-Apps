@@ -106,6 +106,18 @@
                     castWindup: Math.max(0, Math.min(1, Math.round(Number(e.castWindup) || 0))),
                     castTargetX: PD.optionalCoordinate(e.castTargetX),
                     castTargetY: PD.optionalCoordinate(e.castTargetY),
+                    // Only cowardly casters carry a flee budget. A missing
+                    // value means "untouched this encounter" (full budget);
+                    // an explicit value is the spent remainder and is never
+                    // topped back up, so reloading cannot refill the retreat.
+                    fleeLeft: PD.ENEMY_DEFS[e.type].ai === "caster"
+                        ? Math.max(0, Math.min(
+                            PD.ACOLYTE_FLEE_TILES || 2,
+                            Math.round(Number(e.fleeLeft == null
+                                ? (PD.ACOLYTE_FLEE_TILES || 2)
+                                : e.fleeLeft) || 0)
+                        ))
+                        : 0,
                     rewarded: !!e.rewarded,
                     reinforced: !!e.reinforced
                 });

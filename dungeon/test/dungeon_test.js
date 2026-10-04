@@ -1615,6 +1615,55 @@ test("Acolyte bolt misses after the hero leaves the line", function () {
     assert.strictEqual(run.hp, hpBefore, "miss must not deal damage");
 });
 
+test("Acolyte retreat is bounded and then it fights instead of fleeing forever", function () {
+    const run = PD.createRun("knight", 1234);
+    const room = PD.currentRoom(run);
+    room.enemies = [];
+    const ac = PD.makeEnemy("acolyte", 3, 3, 5, 0);
+    room.enemies = [ac];
+    run.x = 3;
+    run.y = 4;
+    // Stand in the acolyte's way every turn: it must retreat exactly
+    // ACOLYTE_FLEE_TILES times and then commit to an attack.
+    let backs = 0;
+    let stands = 0;
+    for (let i = 0; i < 12 && !stands; i += 1) {
+        if (Math.abs(ac.x - run.x) + Math.abs(ac.y - run.y) !== 1) {
+            run.x = ac.x;
+            run.y = ac.y + 1;
+        }
+        const hpBefore = run.hp;
+        const res = PD.waitTurn(run);
+        const joined = res.logs.join(",");
+        if (joined.indexOf("ACOLYTE BACKS AWAY") !== -1) { backs += 1; }
+        if (joined.indexOf("ACOLYTE STANDS ITS GROUND") !== -1) { stands += 1; }
+        // A retreat step must not have dealt damage.
+        if (backs && joined.indexOf("ACOLYTE STANDS ITS GROUND") === -1) {
+            assert.strictEqual(run.hp, hpBefore, "a retreating acolyte must not attack");
+        }
+    }
+    assert.strictEqual(backs, PD.ACOLYTE_FLEE_TILES, "it must retreat exactly ACOLYTE_FLEE_TILES times");
+    assert.ok(backs > 0 && backs <= 4, "retreat must stay short and readable, got " + backs);
+    assert.ok(stands > 0, "after its retreat is spent it must stand and fight");
+});
+
+test("Acolyte flee budget survives save/load and non-casters get none", function () {
+    const save = PD.createEmptySave();
+    save.hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 10, pack: [], lastInn: "keepgate" };
+    save.site = PD.createSiteRun(save.hero, "hold", 91);
+    const room = PD.currentRoom(save.site);
+    room.enemies = [
+        { type: "acolyte", x: 1, y: 1, hp: 6, maxHp: 6, atk: 4, def: 0, gold: 7, ai: "caster", fleeLeft: 1 },
+        { type: "skeleton", x: 5, y: 5, hp: 6, maxHp: 6, atk: 3, def: 0, gold: 5, ai: "relentless", fleeLeft: 99 }
+    ];
+    const restored = PD.applySnapshot(PD.snapshot(save));
+    const foes = restored.site.rooms[restored.site.roomId].enemies;
+    const acolyte = foes.find(function (e) { return e.type === "acolyte"; });
+    const skeleton = foes.find(function (e) { return e.type === "skeleton"; });
+    assert.strictEqual(acolyte.fleeLeft, 1, "a spent flee budget must not be refilled on load");
+    assert.strictEqual(skeleton.fleeLeft, 0, "non-casters must not carry a flee budget");
+});
+
 test("Delayed-attack targets and windups survive save/load round-trip", function () {
     const save = PD.createEmptySave();
     save.hero = { classId: "knight", hp: 20, maxHp: 20, atk: 4, def: 2, gold: 10, pack: [], lastInn: "keepgate" };

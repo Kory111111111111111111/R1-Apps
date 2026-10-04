@@ -125,6 +125,8 @@
             castWindup: 0,
             castTargetX: null,
             castTargetY: null,
+            // Bounded flee budget for cowardly casters; 0 for every other type.
+            fleeLeft: def.ai === "caster" ? (PD.ACOLYTE_FLEE_TILES || 2) : 0,
             rewarded: false,
             reinforced: false
         };

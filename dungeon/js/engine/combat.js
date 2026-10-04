@@ -325,17 +325,31 @@
         }
         if (dist === 1) {
             if (enemy.type === "acolyte") {
-                const awayX = enemy.x + Math.sign(enemy.x - run.x);
-                const awayY = enemy.y + Math.sign(enemy.y - run.y);
-                if (!tryMoveStep(run, room, enemy, awayX, awayY)) {
-                    for (let i = 0; i < PD.FACINGS.length; i += 1) {
-                        const vec = PD.DIR[PD.FACINGS[i]];
-                        if (tryMoveStep(run, room, enemy, enemy.x + vec.x, enemy.y + vec.y)) {
-                            break;
+                // Bounded retreat: the acolyte gives ground only while it has
+                // retreat left this encounter. Once that is spent, or once it is
+                // cornered with nowhere to step, it stops dodging and fights
+                // back, so a melee hero can always finish the encounter.
+                if ((enemy.fleeLeft || 0) > 0) {
+                    const awayX = enemy.x + Math.sign(enemy.x - run.x);
+                    const awayY = enemy.y + Math.sign(enemy.y - run.y);
+                    let stepped = tryMoveStep(run, room, enemy, awayX, awayY);
+                    if (!stepped) {
+                        for (let i = 0; i < PD.FACINGS.length; i += 1) {
+                            const vec = PD.DIR[PD.FACINGS[i]];
+                            if (tryMoveStep(run, room, enemy, enemy.x + vec.x, enemy.y + vec.y)) {
+                                stepped = true;
+                                break;
+                            }
                         }
                     }
+                    if (stepped) {
+                        enemy.fleeLeft -= 1;
+                        logs.push("ACOLYTE BACKS AWAY");
+                        return;
+                    }
                 }
-                logs.push("ACOLYTE BACKS AWAY");
+                logs.push("ACOLYTE STANDS ITS GROUND");
+                attackHero(run, enemy, rng, logs);
                 return;
             }
             if (enemy.type === "rat" && rng.int(1, 100) <= 25) {

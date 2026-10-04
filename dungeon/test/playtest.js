@@ -406,23 +406,22 @@ function agentTurn(run, agent, traceFn) {
         return endedFrom(res) || null;
     }
 
-    // 5b) Caster counter: kill casters first, in acolyte-only AND mixed rooms.
-    // An acolyte backs away whenever the hero is adjacent and never melees, so
-    // melee heroes must convert the caster's OWN turns into hits:
+    // 5b) Caster counter: focus casters first, in acolyte-only AND mixed rooms.
+    // An acolyte backs away when the hero closes, but only for a bounded
+    // number of tiles (PD.ACOLYTE_FLEE_TILES) before it runs out of retreat
+    // and stands its ground. So melee is now the winning plan: walk adjacent
+    // and hit it. Its flee still costs the hero a couple of free turns, and
+    // it keeps free turns to chant at range, so two habits pay off:
     //   * acolyte adjacent at our turn start -> it closed in last turn, bump it
     //   * acolyte chanting (telegraph) in line -> it cannot flee or move this
-    //     turn, so step adjacent now; it spends its turn resolving the bolt,
-    //     and we bump on the next turn
-    //   * otherwise park IN LINE exactly 2 tiles away and wait: every acolyte
-    //     phase is then either a chant (free step-in window) or a chase that
-    //     lands it adjacent (free bump next turn). Do NOT end turns adjacent
-    //     by walking at it, and never re-park a spot we are already on.
+    //     turn, so step adjacent now and start landing hits immediately
+    // Otherwise just close in: the bounded flee guarantees the acolyte runs
+    // out of retreat instead of outrunning us forever.
     // Melee adds around the caster are bumped opportunistically (free hits)
     // but never pursued; focus fire the weakest acolyte first.
-    // Applies to every class: even a mage must never chase an acolyte into
-    // adjacency (its cast needs range >= 2, and a mage-only room with no line
-    // degenerates into the same flee loop as melee). Class tools in block 5
-    // fire first, so a mage in line at range 2-3 still casts every turn.
+    // Applies to every class: a mage in line at range 2-3 still casts every
+    // turn from block 5, and only closes when the cast cannot land.
+    // A lone acolyte can no longer stall this policy.
     if (anyCaster) {
         const adjAdd = livingFoes.find(function (e) {
             return e.type !== "acolyte" && manhattan(run.x, run.y, e.x, e.y) === 1;
@@ -436,18 +435,25 @@ function agentTurn(run, agent, traceFn) {
             return endedFrom(res) || null;
         }
         const acolytes = livingFoes.filter(function (e) { return e.type === "acolyte"; });
-        acolytes.sort(function (a, b) { return a.hp - b.hp; });
-        const ac = acolytes[0];
-        const d = manhattan(run.x, run.y, ac.x, ac.y);
-        const inLine = run.x === ac.x || run.y === ac.y;
-        if (d === 1) {
+        // Hit whatever is already in reach before choosing a target to walk
+        // to. Focusing the weakest acolyte can path through the second one in
+        // a single-tile lane and stall there forever, which is a body-block,
+        // not the flee loop: a real player simply hits what is in front.
+        const adjAcolyte = acolytes.find(function (e) {
+            return manhattan(run.x, run.y, e.x, e.y) === 1;
+        });
+        if (adjAcolyte) {
             markOp(run, "bump");
-            const res = faceAndAct(run, ac.x, ac.y, agent);
+            const res = faceAndAct(run, adjAcolyte.x, adjAcolyte.y, agent);
             agent.actions++;
             run._lastLogs = res.logs || [];
             if (traceFn) { traceFn(res, run); }
             return endedFrom(res) || null;
         }
+        acolytes.sort(function (a, b) { return a.hp - b.hp; });
+        const ac = acolytes[0];
+        const d = manhattan(run.x, run.y, ac.x, ac.y);
+        const inLine = run.x === ac.x || run.y === ac.y;
         // Chant window: the caster is committed this turn and cannot back away.
         if (ac.telegraph && d >= 2 && d <= 3 && inLine) {
             const path = planTo(run, ac.x, ac.y, false) || planTo(run, ac.x, ac.y, true);
@@ -459,54 +465,19 @@ function agentTurn(run, agent, traceFn) {
                 return endedFrom(res) || null;
             }
         }
-        // In line at 2-3 tiles: HOLD GROUND and never re-park. The caster's
-        // only moves from here are a chant (35%: the chant-window branch above
-        // steps in and we bump next turn) or a chase that lands it adjacent
-        // (we bump next turn). It cannot back away while we are not adjacent,
-        // so every turn converges on a hit instead of churning spots.
-        if (inLine && d >= 2 && d <= 3) {
-            markOp(run, "kite-wait");
-            const w = wait(agent, run);
-            if (traceFn) { traceFn(w, run); }
-            return endedFrom(w) || null;
+        // Close in and fight. Its retreat is bounded, so pressing the attack
+        // is what ends the encounter; parking out of range just wastes turns.
+        const closeIn = planTo(run, ac.x, ac.y, false) || planTo(run, ac.x, ac.y, true);
+        if (closeIn && closeIn.length) {
+            markOp(run, "close-caster");
+            const res = faceAndAct(run, closeIn[0].x, closeIn[0].y, agent);
+            agent.actions++;
+            run._lastLogs = res.logs || [];
+            if (traceFn) { traceFn(res, run); }
+            return endedFrom(res) || null;
         }
-        // Off its line or out of range: walk to an in-line tile 2-3 away.
-        // Chasing to adjacency is forbidden — it only makes the caster flee.
-        let spot = null;
-        let bestDist = 1e9;
-        for (let y = 0; y < room.tiles.length; y++) {
-            const row = room.tiles[y] || "";
-            for (let x = 0; x < row.length; x++) {
-                if ((x === run.x && y === run.y) || foeAt(room, x, y)) {
-                    continue;
-                }
-                const t = tileAt(room, x, y);
-                if (t === "#" || t === "+" || t === "$" || t === ">") {
-                    continue;
-                }
-                const nd = manhattan(x, y, ac.x, ac.y);
-                // In line with the caster, 2-3 tiles away, closest approach.
-                if (nd >= 2 && nd <= 3 && (x === ac.x || y === ac.y)) {
-                    const stepDist = manhattan(x, y, run.x, run.y);
-                    if (stepDist < bestDist) {
-                        bestDist = stepDist;
-                        spot = { x: x, y: y };
-                    }
-                }
-            }
-        }
-        if (spot) {
-            const path = planTo(run, spot.x, spot.y, false) || planTo(run, spot.x, spot.y, true);
-            if (path && path.length) {
-                markOp(run, "kite-pos");
-                const res = faceAndAct(run, path[0].x, path[0].y, agent);
-                agent.actions++;
-                if (traceFn) { traceFn(res, run); }
-                return endedFrom(res) || null;
-            }
-        }
-        // No safe park reachable (geometry tight): stand still and punish chases.
-        markOp(run, "kite-wait");
+        // No route to it (geometry tight): hold ground and punish its chase.
+        markOp(run, "hold-caster");
         const w = wait(agent, run);
         if (traceFn) { traceFn(w, run); }
         return endedFrom(w) || null;
@@ -851,8 +822,8 @@ function playRun(hero, siteId, seed, tier) {
             end = "death";
             break;
         }
-        // An acolyte-only room chased for a very long time without any hit means
-        // the fight is unwinnable by this melee policy in this geometry.
+        // The acolyte's flee is bounded now, so an acolyte-only room chased
+        // this long without any hit is a real stall, not the old flee loop.
         if (agent.acolyteRoomSince != null && !agent.acolyteHurt && agent.actions - agent.acolyteRoomSince > 260) {
             end = "kited";
             break;
@@ -860,7 +831,7 @@ function playRun(hero, siteId, seed, tier) {
         // A room should never need more than ~600 agent actions.
         if (agent.actions - (agent.roomActions || 0) > 600) {
             // Separate true wedges from fights the policy cannot close:
-            //   * living acolyte  -> kited     (melee vs caster flee: clarity/difficulty finding)
+            //   * living acolyte  -> kited     (caster melee stall: policy/geometry finding)
             //   * any living foe  -> unclosed  (mid-fight stall: balance/policy finding)
             //   * no foes left    -> stuck     (navigation soft-lock: engine defect)
             const roomCap = PD.currentRoom(run);
@@ -1141,7 +1112,7 @@ function print(outcomes, campaigns, report) {
         console.log("ANOMALIES (" + kinds + ") — investigate:");
         for (const a of report.anomalies.slice(0, 10)) {
             let why = "";
-            if (a.result === "kited") { why = " (living acolyte never closed — clarity finding)"; }
+            if (a.result === "kited") { why = " (living acolyte never closed — caster melee stall)"; }
             if (a.result === "unclosed") { why = " (mid-fight stall — balance/policy finding)"; }
             if (a.result === "stuck") { why = " (no fightable foe left — possible navigation soft-lock)"; }
             console.log("  " + a.classId + "|" + a.site + "#" + a.seed + " -> " + a.result + why);
@@ -1197,7 +1168,7 @@ function print(outcomes, campaigns, report) {
         console.log("  [engine] " + nStuck + " runs could not terminate with no fightable foe — possible navigation soft-lock (see trace).");
     }
     if (nKited) {
-        console.log("  [clarity] " + nKited + " runs stalled on a living ACOLYTE — melee vs its back-away flee is obscure/hard; consider a bounded flee or clearer telegraph.");
+        console.log("  [clarity] " + nKited + " runs stalled on a living ACOLYTE — its flee is bounded (PD.ACOLYTE_FLEE_TILES), so this is the agent failing to close, not an unresolvable fight.");
     }
     if (nUnclosed) {
         console.log("  [balance] " + nUnclosed + " runs stalled mid-fight with foes alive (non-caster) — agent could not close; check the trace.");

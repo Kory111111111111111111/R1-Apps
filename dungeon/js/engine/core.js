@@ -10,6 +10,11 @@
     const SNAPSHOT_VERSION = 3;
     const LEVEL_CAP = 30;
     const BOSS_HEAVY_COOLDOWN = 2;
+    // A caster is cowardly, not endless: it may retreat this many tiles per
+    // encounter before it stops backing away and fights. Keeps the back-away
+    // readable ("it gives ground twice, then it comes at you") while making
+    // every melee approach winnable.
+    const ACOLYTE_FLEE_TILES = 2;
     const REWARD_BOONS = {
         wraith: { phaseStep: "PHASE STEP", description: "NEXT MOVE MAY CROSS A WALL" },
         ogre: { lastStand: "LAST STAND", description: "NEXT HEAVY HIT DEALS 0" }
@@ -405,6 +410,7 @@
     PD.SNAPSHOT_VERSION = SNAPSHOT_VERSION;
     PD.LEVEL_CAP = LEVEL_CAP;
     PD.BOSS_HEAVY_COOLDOWN = BOSS_HEAVY_COOLDOWN;
+    PD.ACOLYTE_FLEE_TILES = ACOLYTE_FLEE_TILES;
     PD.REWARD_BOONS = REWARD_BOONS;
     PD.FLOOR_THEMES = FLOOR_THEMES;
     PD.FACINGS = FACINGS;
